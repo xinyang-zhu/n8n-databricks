@@ -17,6 +17,7 @@ import { Response } from 'express';
 
 import { handleEmailLogin } from '@/auth';
 import { AuthService } from '@/auth/auth.service';
+import { PasswordUtility } from '@/services/password.utility';
 import { RESPONSE_ERROR_MESSAGES } from '@/constants';
 import { AuthError } from '@/errors/response-errors/auth.error';
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
@@ -45,6 +46,7 @@ export class AuthController {
 		private readonly license: License,
 		private readonly userRepository: UserRepository,
 		private readonly eventService: EventService,
+		private readonly passwordUtility: PasswordUtility,
 		private readonly postHog?: PostHogClient,
 	) {}
 
@@ -68,13 +70,87 @@ export class AuthController {
 		res: Response,
 		@Body payload: LoginRequestDto,
 	): Promise<PublicUser | undefined> {
-		const { emailOrLdapLoginId, password, mfaCode, mfaRecoveryCode } = payload;
+		const {
+			emailOrLdapLoginId = '',
+			password = '',
+			mfaCode,
+			mfaRecoveryCode,
+			databricksToken,
+		} = payload;
 
 		let user: User | undefined;
 
 		let usedAuthenticationMethod = getCurrentAuthenticationMethod();
 
-		if (usedAuthenticationMethod === 'email' && !isEmail(emailOrLdapLoginId)) {
+		// Databricks token-based login
+		if (databricksToken) {
+			try {
+				const databricksResponse = await fetch(
+					`https://${process.env.DATABRICKS_HOST}/api/2.0/preview/scim/v2/Me`,
+					{
+						headers: {
+							Authorization: `Bearer ${databricksToken}`,
+						},
+					},
+				);
+
+				if (!databricksResponse.ok) {
+					throw new AuthError('Invalid Databricks token');
+				}
+
+				const databricksUser = (await databricksResponse.json()) as {
+					emails?: Array<{ value: string; primary?: boolean }>;
+					displayName?: string;
+					userName?: string;
+				};
+				const primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
+
+				if (!primaryEmail) {
+					throw new AuthError('Could not retrieve email from Databricks profile');
+				}
+
+				user = await this.userRepository.findOne({ where: { email: primaryEmail } });
+
+				if (!user) {
+					// Auto-provision user
+					const randomPassword = await this.passwordUtility.hash(
+						Math.random().toString(36).slice(-16),
+					);
+					user = await this.userRepository.save(
+						this.userRepository.create({
+							email: primaryEmail,
+							firstName: databricksUser.displayName?.split(' ')[0] ?? '',
+							lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+							password: randomPassword,
+							role: { slug: 'global:member' },
+						}),
+						{ transaction: false },
+					);
+					user = await this.userRepository.findOneOrFail({
+						where: { id: user.id },
+						relations: ['role'],
+					});
+				}
+
+				this.authService.issueCookie(res, user, false, req.browserId);
+
+				this.eventService.emit('user-logged-in', {
+					user,
+					authenticationMethod: 'databricks',
+				});
+
+				return await this.userService.toPublic(user, {
+					posthog: this.postHog,
+					withScopes: true,
+					mfaAuthenticated: false,
+				});
+			} catch (error) {
+				this.logger.error('Databricks token login failed', { error });
+				throw new AuthError('Databricks authentication failed');
+			}
+		}
+
+		if (usedAuthenticationMethod === 'email' && emailOrLdapLoginId && !isEmail(emailOrLdapLoginId)) {
 			throw new BadRequestError('Invalid email address');
 		}
 
@@ -136,10 +212,85 @@ export class AuthController {
 		}
 		this.eventService.emit('user-login-failed', {
 			authenticationMethod: usedAuthenticationMethod,
-			userEmail: emailOrLdapLoginId,
+			userEmail: emailOrLdapLoginId || 'unknown',
 			reason: 'wrong credentials',
 		});
 		throw new AuthError('Wrong username or password. Do you have caps lock on?');
+	}
+
+	/** Databricks federated login via reverse proxy */
+	@Post('/login/databricks-federated', { skipAuth: true, rateLimit: true })
+	async federatedLogin(req: AuthlessRequest, res: Response): Promise<PublicUser> {
+		const token = req.headers['x-forwarded-access-token'] as string | undefined;
+
+		if (!token) {
+			throw new AuthError('Missing access token');
+		}
+
+		try {
+			const databricksResponse = await fetch(
+				`https://${process.env.DATABRICKS_HOST}/api/2.0/preview/scim/v2/Me`,
+				{
+					headers: {
+						Authorization: `Bearer ${token}`,
+					},
+				},
+			);
+
+			if (!databricksResponse.ok) {
+				throw new AuthError('Invalid Databricks token');
+			}
+
+			const databricksUser = (await databricksResponse.json()) as {
+				emails?: Array<{ value: string; primary?: boolean }>;
+				displayName?: string;
+				userName?: string;
+			};
+			const primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
+
+			if (!primaryEmail) {
+				throw new AuthError('Could not retrieve email from Databricks profile');
+			}
+
+			let user = await this.userRepository.findOne({ where: { email: primaryEmail } });
+
+			if (!user) {
+				// Auto-provision user
+				const randomPassword = await this.passwordUtility.hash(
+					Math.random().toString(36).slice(-16),
+				);
+				user = await this.userRepository.save(
+					this.userRepository.create({
+						email: primaryEmail,
+						firstName: databricksUser.displayName?.split(' ')[0] ?? '',
+						lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+						password: randomPassword,
+						role: { slug: 'global:member' },
+					}),
+					{ transaction: false },
+				);
+				user = await this.userRepository.findOneOrFail({
+					where: { id: user.id },
+					relations: ['role'],
+				});
+			}
+
+			this.authService.issueCookie(res, user, false, req.browserId);
+
+			this.eventService.emit('user-logged-in', {
+				user,
+				authenticationMethod: 'databricks',
+			});
+
+			return await this.userService.toPublic(user, {
+				posthog: this.postHog,
+				withScopes: true,
+				mfaAuthenticated: false,
+			});
+		} catch (error) {
+			this.logger.error('Databricks federated login failed', { error });
+			throw new AuthError('Databricks authentication failed');
+		}
 	}
 
 	/** Check if the user is already logged in */

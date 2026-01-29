@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import AuthView from './AuthView.vue';
@@ -12,10 +12,12 @@ import { useTelemetry } from '@/app/composables/useTelemetry';
 import { useUsersStore } from '@/features/settings/users/users.store';
 import { useSettingsStore } from '@/app/stores/settings.store';
 import { useSSOStore } from '@/features/settings/sso/sso.store';
+import { useRootStore } from '@n8n/stores/useRootStore';
 
 import type { IFormBoxConfig } from '@/Interface';
 import { MFA_AUTHENTICATION_REQUIRED_ERROR_CODE, VIEWS, MFA_FORM } from '@/app/constants';
 import type { LoginRequestDto } from '@n8n/api-types';
+import { makeRestApiRequest } from '@n8n/rest-api-client';
 
 export type EmailOrLdapLoginIdAndPassword = Pick<
 	LoginRequestDto,
@@ -27,6 +29,7 @@ export type MfaCodeOrMfaRecoveryCode = Pick<LoginRequestDto, 'mfaCode' | 'mfaRec
 const usersStore = useUsersStore();
 const settingsStore = useSettingsStore();
 const ssoStore = useSSOStore();
+const rootStore = useRootStore();
 
 const route = useRoute();
 const router = useRouter();
@@ -40,6 +43,7 @@ const showMfaView = ref(false);
 const emailOrLdapLoginId = ref('');
 const password = ref('');
 const reportError = ref(false);
+const loginMode = ref<'none' | 'token' | 'password'>('none');
 
 const ldapLoginLabel = computed(() => ssoStore.ldapLoginLabel);
 const isLdapLoginEnabled = computed(() => ssoStore.isLdapLoginEnabled);
@@ -51,39 +55,70 @@ const emailLabel = computed(() => {
 	return label;
 });
 
-const formConfig: IFormBoxConfig = reactive({
-	title: locale.baseText('auth.signin'),
-	buttonText: locale.baseText('auth.signin'),
-	redirectText: locale.baseText('forgotPassword'),
-	redirectLink: '/forgot-password',
-	inputs: [
-		{
-			name: 'emailOrLdapLoginId',
-			properties: {
-				label: emailLabel.value,
-				type: 'email',
-				required: true,
-				...(!isLdapLoginEnabled.value && { validationRules: [{ name: 'VALID_EMAIL' }] }),
-				showRequiredAsterisk: false,
-				validateOnBlur: false,
-				autocomplete: 'email',
-				capitalize: true,
-				focusInitially: true,
-			},
-		},
-		{
-			name: 'password',
-			properties: {
-				label: locale.baseText('auth.password'),
-				type: 'password',
-				required: true,
-				showRequiredAsterisk: false,
-				validateOnBlur: false,
-				autocomplete: 'current-password',
-				capitalize: true,
-			},
-		},
-	],
+const formConfig = computed<IFormBoxConfig>(() => {
+	if (loginMode.value === 'token') {
+		return {
+			title: locale.baseText('auth.signin'),
+			buttonText: locale.baseText('auth.signin'),
+			inputs: [
+				{
+					name: 'databricksToken',
+					properties: {
+						label: 'Databricks Personal Access Token',
+						type: 'password',
+						required: true,
+						showRequiredAsterisk: false,
+						validateOnBlur: false,
+						autocomplete: 'off',
+						capitalize: true,
+						focusInitially: true,
+					},
+				},
+			],
+		};
+	}
+	if (loginMode.value === 'password') {
+		return {
+			title: locale.baseText('auth.signin'),
+			buttonText: locale.baseText('auth.signin'),
+			redirectText: locale.baseText('forgotPassword'),
+			redirectLink: '/forgot-password',
+			inputs: [
+				{
+					name: 'emailOrLdapLoginId',
+					properties: {
+						label: emailLabel.value,
+						type: 'email',
+						required: true,
+						...(!isLdapLoginEnabled.value && { validationRules: [{ name: 'VALID_EMAIL' }] }),
+						showRequiredAsterisk: false,
+						validateOnBlur: false,
+						autocomplete: 'email',
+						capitalize: true,
+						focusInitially: true,
+					},
+				},
+				{
+					name: 'password',
+					properties: {
+						label: locale.baseText('auth.password'),
+						type: 'password',
+						required: true,
+						showRequiredAsterisk: false,
+						validateOnBlur: false,
+						autocomplete: 'current-password',
+						capitalize: true,
+					},
+				},
+			],
+		};
+	}
+	// Default 'none' mode - federated login only
+	return {
+		title: locale.baseText('auth.signin'),
+		buttonText: '',
+		inputs: [],
+	};
 });
 
 const onMFASubmitted = async (form: MfaCodeOrMfaRecoveryCode) => {
@@ -132,6 +167,7 @@ const login = async (form: LoginRequestDto) => {
 			password: form.password,
 			mfaCode: form.mfaCode,
 			mfaRecoveryCode: form.mfaRecoveryCode,
+			databricksToken: form.databricksToken,
 		});
 		loading.value = false;
 		await settingsStore.getSettings();
@@ -196,6 +232,47 @@ const cacheCredentials = (form: EmailOrLdapLoginIdAndPassword) => {
 	emailOrLdapLoginId.value = form.emailOrLdapLoginId;
 	password.value = form.password;
 };
+
+const onFederatedLogin = async () => {
+	try {
+		loading.value = true;
+		const user = await makeRestApiRequest(rootStore.restApiContext, 'POST', '/login/databricks-federated');
+		usersStore.setCurrentUser(user);
+		await settingsStore.getSettings();
+		toast.clearAllStickyNotifications();
+
+		telemetry.track('User attempted to login', {
+			result: 'federated_success',
+		});
+
+		if (isRedirectSafe()) {
+			const redirect = getRedirectQueryParameter();
+			if (redirect.startsWith('http')) {
+				window.location.href = redirect;
+				return;
+			}
+			void router.push(redirect);
+			return;
+		}
+
+		await router.push({ name: VIEWS.HOMEPAGE });
+	} catch (error) {
+		toast.showError(error, 'Federated login failed');
+		loading.value = false;
+	}
+};
+
+const onTokenSubmitted = async (form: { databricksToken: string }) => {
+	await login({ databricksToken: form.databricksToken });
+};
+
+onMounted(async () => {
+	// Auto-login via query parameter
+	const databricksToken = route.query.databricksToken as string | undefined;
+	if (databricksToken) {
+		await login({ databricksToken });
+	}
+});
 </script>
 
 <template>
@@ -204,10 +281,36 @@ const cacheCredentials = (form: EmailOrLdapLoginIdAndPassword) => {
 			v-if="!showMfaView"
 			:form="formConfig"
 			:form-loading="loading"
-			:with-sso="true"
+			:with-sso="loginMode === 'password'"
 			data-test-id="signin-form"
-			@submit="onEmailPasswordSubmitted"
-		/>
+			@submit="loginMode === 'token' ? onTokenSubmitted($event) : onEmailPasswordSubmitted($event)"
+		>
+			<template #sso>
+				<div v-if="loginMode === 'none'" :style="{ textAlign: 'center' }">
+					<n8n-button
+						:label="'Sign in with Databricks'"
+						:loading="loading"
+						size="large"
+						@click="onFederatedLogin"
+					/>
+					<div :style="{ marginTop: '16px' }">
+						<a href="#" @click.prevent="loginMode = 'token'">Sign in with token</a>
+						<span :style="{ margin: '0 8px' }">|</span>
+						<a href="#" @click.prevent="loginMode = 'password'">Sign in with password</a>
+					</div>
+				</div>
+				<div v-else-if="loginMode === 'token'" :style="{ textAlign: 'center', marginTop: '16px' }">
+					<a href="#" @click.prevent="loginMode = 'none'">Back to federated login</a>
+					<span :style="{ margin: '0 8px' }">|</span>
+					<a href="#" @click.prevent="loginMode = 'password'">Sign in with password</a>
+				</div>
+				<div v-else :style="{ textAlign: 'center', marginTop: '16px' }">
+					<a href="#" @click.prevent="loginMode = 'none'">Back to federated login</a>
+					<span :style="{ margin: '0 8px' }">|</span>
+					<a href="#" @click.prevent="loginMode = 'token'">Sign in with token</a>
+				</div>
+			</template>
+		</AuthView>
 		<MfaView
 			v-if="showMfaView"
 			:report-error="reportError"

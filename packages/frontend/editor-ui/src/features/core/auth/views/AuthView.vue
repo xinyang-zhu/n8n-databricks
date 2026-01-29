@@ -57,7 +57,9 @@ const {
 				@submit="onSubmit"
 				@update="onUpdate"
 			>
-				<SSOLogin v-if="withSso" />
+				<slot name="sso">
+					<SSOLogin v-if="withSso" />
+				</slot>
 			</N8nFormBox>
 		</div>
 	</div>

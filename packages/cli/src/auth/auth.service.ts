@@ -15,6 +15,7 @@ import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
 import { License } from '@/license';
 import { MfaService } from '@/mfa/mfa.service';
 import { JwtService } from '@/services/jwt.service';
+import { PasswordUtility } from '@/services/password.utility';
 import { UrlService } from '@/services/url.service';
 
 interface AuthJwtPayload {
@@ -68,6 +69,7 @@ export class AuthService {
 		private readonly userRepository: UserRepository,
 		private readonly invalidAuthTokenRepository: InvalidAuthTokenRepository,
 		private readonly mfaService: MfaService,
+		private readonly passwordUtility: PasswordUtility,
 	) {
 		const restEndpoint = globalConfig.endpoints.rest;
 		this.skipBrowserIdCheckEndpoints = [
@@ -147,6 +149,22 @@ export class AuthService {
 				}
 			}
 
+			// If no JWT cookie auth, try Databricks token from x-forwarded-token header
+			if (!req.user) {
+				const databricksToken = req.headers['x-forwarded-token'] as string | undefined;
+				if (databricksToken) {
+					try {
+						const user = await this.authenticateWithDatabricksToken(databricksToken);
+						req.user = user;
+						req.authInfo = { usedMfa: false };
+					} catch (error) {
+						this.logger.debug('Databricks token authentication failed', {
+							error: error instanceof Error ? error.message : error,
+						});
+					}
+				}
+			}
+
 			const isPreviewMode = process.env.N8N_PREVIEW_MODE === 'true';
 			const shouldSkipAuth = (allowSkipPreviewAuth && isPreviewMode) || allowUnauthenticated;
 
@@ -154,6 +172,70 @@ export class AuthService {
 			else if (shouldSkipAuth) next();
 			else res.status(401).json({ status: 'error', message: 'Unauthorized' });
 		};
+	}
+
+	/**
+	 * Authenticate a user using a Databricks personal access token.
+	 * Validates the token against Databricks SCIM API and auto-provisions users if needed.
+	 */
+	private async authenticateWithDatabricksToken(token: string): Promise<User> {
+		const databricksHost = process.env.DATABRICKS_HOST;
+		if (!databricksHost) {
+			throw new AuthError('DATABRICKS_HOST environment variable not configured');
+		}
+
+		const databricksResponse = await fetch(
+			`https://${databricksHost}/api/2.0/preview/scim/v2/Me`,
+			{
+				headers: {
+					Authorization: `Bearer ${token}`,
+				},
+			},
+		);
+
+		if (!databricksResponse.ok) {
+			throw new AuthError('Invalid Databricks token');
+		}
+
+		const databricksUser = (await databricksResponse.json()) as {
+			emails?: Array<{ value: string; primary?: boolean }>;
+			displayName?: string;
+			userName?: string;
+		};
+		const primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
+
+		if (!primaryEmail) {
+			throw new AuthError('Could not retrieve email from Databricks profile');
+		}
+
+		let user = await this.userRepository.findOne({
+			where: { email: primaryEmail },
+			relations: ['role'],
+		});
+
+		if (!user) {
+			// Auto-provision user
+			const randomPassword = await this.passwordUtility.hash(
+				Math.random().toString(36).slice(-16),
+			);
+			user = await this.userRepository.save(
+				this.userRepository.create({
+					email: primaryEmail,
+					firstName: databricksUser.displayName?.split(' ')[0] ?? '',
+					lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+					password: randomPassword,
+					role: { slug: 'global:member' },
+				}),
+				{ transaction: false },
+			);
+			user = await this.userRepository.findOneOrFail({
+				where: { id: user.id },
+				relations: ['role'],
+			});
+			this.logger.info('Auto-provisioned user from Databricks', { email: primaryEmail });
+		}
+
+		return user;
 	}
 
 	getCookieToken(req: AuthenticatedRequest) {

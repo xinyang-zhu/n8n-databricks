@@ -7,8 +7,10 @@ export class LoginRequestDto extends Z.class({
 	 * is not enforced here. The controller determines whether this is an
 	 * email and validates when LDAP is disabled
 	 */
-	emailOrLdapLoginId: z.string().trim().max(255),
-	password: z.string().min(1),
+	emailOrLdapLoginId: z.string().trim().optional(),
+	password: z.string().min(1).optional(),
 	mfaCode: z.string().optional(),
 	mfaRecoveryCode: z.string().optional(),
+	/** Optional Databricks personal access token for token-based login */
+	databricksToken: z.string().min(1).optional(),
 }) {}
