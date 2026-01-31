@@ -23,13 +23,29 @@ export interface ITelemetrySettings {
 	config?: ITelemetryClientConfig;
 }
 
-export type AuthenticationMethod = 'email' | 'ldap' | 'saml' | 'oidc';
+export type AuthenticationMethod = 'email' | 'ldap' | 'saml' | 'oidc' | 'databricks';
 
 export interface IUserManagementSettings {
 	quota: number;
 	showSetupOnFirstLoad?: boolean;
 	smtpSetup: boolean;
 	authenticationMethod: AuthenticationMethod;
+}
+
+export interface IAuthMethodsSettings {
+	/** Email/password login enabled */
+	emailEnabled: boolean;
+	/** User sign-up enabled (first user becomes owner) */
+	signupEnabled: boolean;
+}
+
+export interface IDatabricksSettings {
+	/** Databricks workspace host */
+	host?: string;
+	/** Databricks federated login enabled (reverse proxy) */
+	federatedLoginEnabled: boolean;
+	/** Databricks token login enabled (user PAT) */
+	tokenLoginEnabled: boolean;
 }
 
 export interface IEnterpriseSettings {
@@ -62,6 +78,12 @@ export interface IEnterpriseSettings {
 
 export interface FrontendSettings {
 	settingsMode?: 'public' | 'authenticated';
+	/** @deprecated Use databricks.host instead */
+	databricksHost?: string;
+	/** Databricks authentication settings */
+	databricks: IDatabricksSettings;
+	/** Authentication methods settings */
+	authMethods: IAuthMethodsSettings;
 	inE2ETests: boolean;
 	isDocker: boolean;
 	databaseType: 'sqlite' | 'postgresdb';

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { N8nButton } from '@n8n/design-system';
 
 import AuthView from './AuthView.vue';
 import MfaView from './MfaView.vue';
@@ -18,6 +19,7 @@ import type { IFormBoxConfig } from '@/Interface';
 import { MFA_AUTHENTICATION_REQUIRED_ERROR_CODE, VIEWS, MFA_FORM } from '@/app/constants';
 import type { LoginRequestDto } from '@n8n/api-types';
 import { makeRestApiRequest } from '@n8n/rest-api-client';
+import type { CurrentUserResponse } from '@n8n/rest-api-client/api/users';
 
 export type EmailOrLdapLoginIdAndPassword = Pick<
 	LoginRequestDto,
@@ -47,6 +49,14 @@ const loginMode = ref<'none' | 'token' | 'password'>('none');
 
 const ldapLoginLabel = computed(() => ssoStore.ldapLoginLabel);
 const isLdapLoginEnabled = computed(() => ssoStore.isLdapLoginEnabled);
+const databricksHost = computed(() => settingsStore.databricksHost);
+const databricksSettings = computed(() => settingsStore.databricksSettings);
+const authMethodsSettings = computed(() => settingsStore.authMethodsSettings);
+
+// Computed flags for what login methods are available
+const isFederatedLoginEnabled = computed(() => databricksSettings.value.federatedLoginEnabled);
+const isTokenLoginEnabled = computed(() => databricksSettings.value.tokenLoginEnabled);
+const isEmailLoginEnabled = computed(() => authMethodsSettings.value.emailEnabled);
 const emailLabel = computed(() => {
 	let label = locale.baseText('auth.email');
 	if (isLdapLoginEnabled.value && ldapLoginLabel.value) {
@@ -228,16 +238,20 @@ const onFormChanged = (toForm: string) => {
 		reportError.value = false;
 	}
 };
-const cacheCredentials = (form: EmailOrLdapLoginIdAndPassword) => {
-	emailOrLdapLoginId.value = form.emailOrLdapLoginId;
-	password.value = form.password;
+const cacheCredentials = (form: LoginRequestDto) => {
+	emailOrLdapLoginId.value = form.emailOrLdapLoginId ?? '';
+	password.value = form.password ?? '';
 };
 
 const onFederatedLogin = async () => {
 	try {
 		loading.value = true;
-		const user = await makeRestApiRequest(rootStore.restApiContext, 'POST', '/login/databricks-federated');
-		usersStore.setCurrentUser(user);
+		const user = await makeRestApiRequest<CurrentUserResponse>(
+			rootStore.restApiContext,
+			'POST',
+			'/login/databricks-federated',
+		);
+		await usersStore.setCurrentUser(user);
 		await settingsStore.getSettings();
 		toast.clearAllStickyNotifications();
 
@@ -266,10 +280,43 @@ const onTokenSubmitted = async (form: { databricksToken: string }) => {
 	await login({ databricksToken: form.databricksToken });
 };
 
+const onFormSubmit = async (form: Record<string, string>) => {
+	if (loginMode.value === 'token') {
+		await onTokenSubmitted(form as { databricksToken: string });
+	} else {
+		await onEmailPasswordSubmitted(form as EmailOrLdapLoginIdAndPassword);
+	}
+};
+
+const updateLoginMode = () => {
+	if (isFederatedLoginEnabled.value) {
+		loginMode.value = 'none';
+	} else if (isTokenLoginEnabled.value) {
+		loginMode.value = 'token';
+	} else if (isEmailLoginEnabled.value) {
+		loginMode.value = 'password';
+	} else {
+		loginMode.value = 'password';
+	}
+};
+
+// Watch for settings changes and update login mode
+watch(
+	() => [
+		settingsStore.databricksSettings.federatedLoginEnabled,
+		settingsStore.databricksSettings.tokenLoginEnabled,
+		settingsStore.authMethodsSettings.emailEnabled,
+	],
+	() => {
+		updateLoginMode();
+	},
+	{ immediate: true, deep: true },
+);
+
 onMounted(async () => {
 	// Auto-login via query parameter
 	const databricksToken = route.query.databricksToken as string | undefined;
-	if (databricksToken) {
+	if (databricksToken && isTokenLoginEnabled.value) {
 		await login({ databricksToken });
 	}
 });
@@ -281,33 +328,70 @@ onMounted(async () => {
 			v-if="!showMfaView"
 			:form="formConfig"
 			:form-loading="loading"
-			:with-sso="loginMode === 'password'"
+			:with-sso="true"
 			data-test-id="signin-form"
-			@submit="loginMode === 'token' ? onTokenSubmitted($event) : onEmailPasswordSubmitted($event)"
+			@submit="onFormSubmit"
 		>
 			<template #sso>
-				<div v-if="loginMode === 'none'" :style="{ textAlign: 'center' }">
-					<n8n-button
-						:label="'Sign in with Databricks'"
+				<!-- Federated login mode -->
+				<div
+					v-if="loginMode === 'none' && isFederatedLoginEnabled"
+					:style="{ textAlign: 'center' }"
+				>
+					<div
+						v-if="databricksHost"
+						:style="{
+							marginBottom: '12px',
+							color: 'var(--color-text-base)',
+							fontSize: 'var(--font-size-2xs)',
+						}"
+					>
+						{{ databricksHost }}
+					</div>
+					<N8nButton
+						label="Sign in with Databricks"
 						:loading="loading"
 						size="large"
 						@click="onFederatedLogin"
 					/>
-					<div :style="{ marginTop: '16px' }">
-						<a href="#" @click.prevent="loginMode = 'token'">Sign in with token</a>
-						<span :style="{ margin: '0 8px' }">|</span>
-						<a href="#" @click.prevent="loginMode = 'password'">Sign in with password</a>
+					<div v-if="isTokenLoginEnabled || isEmailLoginEnabled" :style="{ marginTop: '16px' }">
+						<a v-if="isTokenLoginEnabled" href="#" @click.prevent="loginMode = 'token'"
+							>Sign in with token</a
+						>
+						<span v-if="isTokenLoginEnabled && isEmailLoginEnabled" :style="{ margin: '0 8px' }"
+							>|</span
+						>
+						<a v-if="isEmailLoginEnabled" href="#" @click.prevent="loginMode = 'password'"
+							>Sign in with password</a
+						>
 					</div>
 				</div>
+				<!-- Token login mode -->
 				<div v-else-if="loginMode === 'token'" :style="{ textAlign: 'center', marginTop: '16px' }">
-					<a href="#" @click.prevent="loginMode = 'none'">Back to federated login</a>
-					<span :style="{ margin: '0 8px' }">|</span>
-					<a href="#" @click.prevent="loginMode = 'password'">Sign in with password</a>
+					<a v-if="isFederatedLoginEnabled" href="#" @click.prevent="loginMode = 'none'"
+						>Back to federated login</a
+					>
+					<span v-if="isFederatedLoginEnabled && isEmailLoginEnabled" :style="{ margin: '0 8px' }"
+						>|</span
+					>
+					<a v-if="isEmailLoginEnabled" href="#" @click.prevent="loginMode = 'password'"
+						>Sign in with password</a
+					>
 				</div>
-				<div v-else :style="{ textAlign: 'center', marginTop: '16px' }">
-					<a href="#" @click.prevent="loginMode = 'none'">Back to federated login</a>
-					<span :style="{ margin: '0 8px' }">|</span>
-					<a href="#" @click.prevent="loginMode = 'token'">Sign in with token</a>
+				<!-- Password login mode -->
+				<div
+					v-else-if="loginMode === 'password'"
+					:style="{ textAlign: 'center', marginTop: '16px' }"
+				>
+					<a v-if="isFederatedLoginEnabled" href="#" @click.prevent="loginMode = 'none'"
+						>Back to federated login</a
+					>
+					<span v-if="isFederatedLoginEnabled && isTokenLoginEnabled" :style="{ margin: '0 8px' }"
+						>|</span
+					>
+					<a v-if="isTokenLoginEnabled" href="#" @click.prevent="loginMode = 'token'"
+						>Sign in with token</a
+					>
 				</div>
 			</template>
 		</AuthView>

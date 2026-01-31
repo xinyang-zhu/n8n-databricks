@@ -4,6 +4,15 @@ export const defaultSettings: FrontendSettings = {
 	inE2ETests: false,
 	databaseType: 'sqlite',
 	isDocker: false,
+	databricks: {
+		host: undefined,
+		federatedLoginEnabled: false,
+		tokenLoginEnabled: false,
+	},
+	authMethods: {
+		emailEnabled: true,
+		signupEnabled: true,
+	},
 	pruning: {
 		isEnabled: false,
 		maxAge: 0,

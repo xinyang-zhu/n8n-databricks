@@ -2,12 +2,13 @@ import { GlobalConfig } from '@n8n/config';
 import { AuthenticatedRequest } from '@n8n/db';
 import { RestController } from '@n8n/decorators';
 import { Container } from '@n8n/di';
+import type { Router as IRouter } from 'express';
 import { Router } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 @RestController('/ph')
 export class PostHogController {
-	static routers = [
+	static routers: Array<{ path: string; router: IRouter; skipAuth: boolean }> = [
 		{
 			path: '/',
 			router: (() => {

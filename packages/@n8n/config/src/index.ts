@@ -4,6 +4,7 @@ import { AiAssistantConfig } from './configs/ai-assistant.config';
 import { AiBuilderConfig } from './configs/ai-builder.config';
 import { AiConfig } from './configs/ai.config';
 import { AuthConfig } from './configs/auth.config';
+import { AuthMethodsConfig, DatabricksConfig } from './configs/databricks.config';
 import { CacheConfig } from './configs/cache.config';
 import { CredentialsConfig } from './configs/credentials.config';
 import { DataTableConfig } from './configs/data-table.config';
@@ -52,6 +53,7 @@ export type { LogScope } from './configs/logging.config';
 export { WorkflowsConfig } from './configs/workflows.config';
 export * from './custom-types';
 export { DeploymentConfig } from './configs/deployment.config';
+export { DatabricksConfig, AuthMethodsConfig } from './configs/databricks.config';
 export { MfaConfig } from './configs/mfa.config';
 export { HiringBannerConfig } from './configs/hiring-banner.config';
 export { PersonalizationConfig } from './configs/personalization.config';
@@ -67,6 +69,12 @@ export type Protocol = z.infer<typeof protocolSchema>;
 export class GlobalConfig {
 	@Nested
 	auth: AuthConfig;
+
+	@Nested
+	authMethods: AuthMethodsConfig;
+
+	@Nested
+	databricks: DatabricksConfig;
 
 	@Nested
 	database: DatabaseConfig;

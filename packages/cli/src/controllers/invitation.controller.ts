@@ -1,5 +1,6 @@
 import { AcceptInvitationRequestDto, InviteUsersRequestDto } from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
+import { GlobalConfig } from '@n8n/config';
 import type { User } from '@n8n/db';
 import { UserRepository, AuthenticatedRequest } from '@n8n/db';
 import {
@@ -31,6 +32,7 @@ import { Time } from '@n8n/constants';
 export class InvitationController {
 	constructor(
 		private readonly logger: Logger,
+		private readonly globalConfig: GlobalConfig,
 		private readonly externalHooks: ExternalHooks,
 		private readonly authService: AuthService,
 		private readonly userService: UserService,
@@ -54,6 +56,11 @@ export class InvitationController {
 		@Body invitations: InviteUsersRequestDto,
 	) {
 		if (invitations.length === 0) return [];
+
+		if (!this.globalConfig.authMethods.signupEnabled) {
+			this.logger.debug('Request to invite user(s) failed because sign-up is disabled');
+			throw new ForbiddenError('Sign-up is disabled, user invitations are not allowed');
+		}
 
 		const isWithinUsersLimit = this.license.isWithinUsersLimit();
 
@@ -173,6 +180,11 @@ export class InvitationController {
 		res: Response,
 		@Body payload: AcceptInvitationRequestDto,
 	) {
+		if (!this.globalConfig.authMethods.signupEnabled) {
+			this.logger.debug('Request to accept invitation failed because sign-up is disabled');
+			throw new ForbiddenError('Sign-up is disabled');
+		}
+
 		if (isSsoCurrentAuthenticationMethod()) {
 			this.logger.debug(
 				'Invite links are not supported on this system, please use single sign on instead.',
@@ -225,6 +237,11 @@ export class InvitationController {
 		@Body payload: AcceptInvitationRequestDto,
 		@Param('id') inviteeId: string,
 	) {
+		if (!this.globalConfig.authMethods.signupEnabled) {
+			this.logger.debug('Request to accept invitation failed because sign-up is disabled');
+			throw new ForbiddenError('Sign-up is disabled');
+		}
+
 		if (isSsoCurrentAuthenticationMethod()) {
 			this.logger.debug(
 				'Invite links are not supported on this system, please use single sign on instead.',

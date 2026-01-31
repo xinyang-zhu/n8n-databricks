@@ -48,6 +48,27 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 
 	const isDocker = computed(() => settings.value?.isDocker ?? false);
 
+	const databricksHost = computed(
+		() => settings.value?.databricks?.host ?? settings.value?.databricksHost,
+	);
+
+	const databricksSettings = computed(
+		() =>
+			settings.value?.databricks ?? {
+				host: undefined,
+				federatedLoginEnabled: false,
+				tokenLoginEnabled: false,
+			},
+	);
+
+	const authMethodsSettings = computed(
+		() =>
+			settings.value?.authMethods ?? {
+				emailEnabled: true,
+				signupEnabled: true,
+			},
+	);
+
 	const databaseType = computed(() => settings.value?.databaseType);
 
 	const planName = computed(() => settings.value?.license.planName ?? 'Community');
@@ -335,6 +356,9 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		api,
 		mfa,
 		isDocker,
+		databricksHost,
+		databricksSettings,
+		authMethodsSettings,
 		isDevRelease,
 		isEnterpriseFeatureEnabled,
 		databaseType,

@@ -458,6 +458,7 @@ export const useUsersStore = defineStore(STORES.USERS, () => {
 		canUserUpdateVersion,
 		usersLimitNotReached,
 		addUsers,
+		setCurrentUser,
 		loginWithCookie,
 		initialize,
 		setPersonalizationAnswers,

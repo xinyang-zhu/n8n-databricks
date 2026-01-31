@@ -1,5 +1,6 @@
 import { LoginRequestDto, ResolveSignupTokenQueryDto } from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
+import { GlobalConfig } from '@n8n/config';
 import { Time } from '@n8n/constants';
 import type { User, PublicUser } from '@n8n/db';
 import { UserRepository, AuthenticatedRequest, GLOBAL_OWNER_ROLE } from '@n8n/db';
@@ -40,6 +41,7 @@ import {
 export class AuthController {
 	constructor(
 		private readonly logger: Logger,
+		private readonly globalConfig: GlobalConfig,
 		private readonly authService: AuthService,
 		private readonly mfaService: MfaService,
 		private readonly userService: UserService,
@@ -84,9 +86,14 @@ export class AuthController {
 
 		// Databricks token-based login
 		if (databricksToken) {
+			if (!this.globalConfig.databricks.tokenLoginEnabled) {
+				throw new AuthError('Databricks token login is not enabled');
+			}
+
 			try {
+				const databricksHost = this.globalConfig.databricks.host.replace(/^https?:\/\//, '');
 				const databricksResponse = await fetch(
-					`https://${process.env.DATABRICKS_HOST}/api/2.0/preview/scim/v2/Me`,
+					`https://${databricksHost}/api/2.0/preview/scim/v2/Me`,
 					{
 						headers: {
 							Authorization: `Bearer ${databricksToken}`,
@@ -109,27 +116,25 @@ export class AuthController {
 					throw new AuthError('Could not retrieve email from Databricks profile');
 				}
 
-				user = await this.userRepository.findOne({ where: { email: primaryEmail } });
+				user =
+					(await this.userRepository.findOne({
+						where: { email: primaryEmail },
+						relations: ['role'],
+					})) ?? undefined;
 
 				if (!user) {
-					// Auto-provision user
+					// Auto-provision user with personal project
 					const randomPassword = await this.passwordUtility.hash(
 						Math.random().toString(36).slice(-16),
 					);
-					user = await this.userRepository.save(
-						this.userRepository.create({
-							email: primaryEmail,
-							firstName: databricksUser.displayName?.split(' ')[0] ?? '',
-							lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
-							password: randomPassword,
-							role: { slug: 'global:member' },
-						}),
-						{ transaction: false },
-					);
-					user = await this.userRepository.findOneOrFail({
-						where: { id: user.id },
-						relations: ['role'],
+					const result = await this.userRepository.createUserWithProject({
+						email: primaryEmail,
+						firstName: databricksUser.displayName?.split(' ')[0] ?? '',
+						lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+						password: randomPassword,
+						role: { slug: 'global:member' },
 					});
+					user = result.user;
 				}
 
 				this.authService.issueCookie(res, user, false, req.browserId);
@@ -150,8 +155,17 @@ export class AuthController {
 			}
 		}
 
-		if (usedAuthenticationMethod === 'email' && emailOrLdapLoginId && !isEmail(emailOrLdapLoginId)) {
+		if (
+			usedAuthenticationMethod === 'email' &&
+			emailOrLdapLoginId &&
+			!isEmail(emailOrLdapLoginId)
+		) {
 			throw new BadRequestError('Invalid email address');
+		}
+
+		// Check if email login is enabled (skip check for SSO methods which have their own controls)
+		if (usedAuthenticationMethod === 'email' && !this.globalConfig.authMethods.emailEnabled) {
+			throw new AuthError('Email/password login is not enabled');
 		}
 
 		if (isSamlCurrentAuthenticationMethod() || isOidcCurrentAuthenticationMethod()) {
@@ -219,8 +233,12 @@ export class AuthController {
 	}
 
 	/** Databricks federated login via reverse proxy */
-	@Post('/login/databricks-federated', { skipAuth: true, rateLimit: true })
+	@Post('/login/databricks-federated', { skipAuth: true, ipRateLimit: true })
 	async federatedLogin(req: AuthlessRequest, res: Response): Promise<PublicUser> {
+		if (!this.globalConfig.databricks.federatedLoginEnabled) {
+			throw new AuthError('Databricks federated login is not enabled');
+		}
+
 		const token = req.headers['x-forwarded-access-token'] as string | undefined;
 
 		if (!token) {
@@ -228,8 +246,9 @@ export class AuthController {
 		}
 
 		try {
+			const databricksHost = this.globalConfig.databricks.host.replace(/^https?:\/\//, '');
 			const databricksResponse = await fetch(
-				`https://${process.env.DATABRICKS_HOST}/api/2.0/preview/scim/v2/Me`,
+				`https://${databricksHost}/api/2.0/preview/scim/v2/Me`,
 				{
 					headers: {
 						Authorization: `Bearer ${token}`,
@@ -252,27 +271,25 @@ export class AuthController {
 				throw new AuthError('Could not retrieve email from Databricks profile');
 			}
 
-			let user = await this.userRepository.findOne({ where: { email: primaryEmail } });
+			let user =
+				(await this.userRepository.findOne({
+					where: { email: primaryEmail },
+					relations: ['role'],
+				})) ?? undefined;
 
 			if (!user) {
-				// Auto-provision user
+				// Auto-provision user with personal project
 				const randomPassword = await this.passwordUtility.hash(
 					Math.random().toString(36).slice(-16),
 				);
-				user = await this.userRepository.save(
-					this.userRepository.create({
-						email: primaryEmail,
-						firstName: databricksUser.displayName?.split(' ')[0] ?? '',
-						lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
-						password: randomPassword,
-						role: { slug: 'global:member' },
-					}),
-					{ transaction: false },
-				);
-				user = await this.userRepository.findOneOrFail({
-					where: { id: user.id },
-					relations: ['role'],
+				const result = await this.userRepository.createUserWithProject({
+					email: primaryEmail,
+					firstName: databricksUser.displayName?.split(' ')[0] ?? '',
+					lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+					password: randomPassword,
+					role: { slug: 'global:member' },
 				});
+				user = result.user;
 			}
 
 			this.authService.issueCookie(res, user, false, req.browserId);

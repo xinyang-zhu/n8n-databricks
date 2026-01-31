@@ -179,19 +179,16 @@ export class AuthService {
 	 * Validates the token against Databricks SCIM API and auto-provisions users if needed.
 	 */
 	private async authenticateWithDatabricksToken(token: string): Promise<User> {
-		const databricksHost = process.env.DATABRICKS_HOST;
+		const databricksHost = (process.env.DATABRICKS_HOST ?? '').replace(/^https?:\/\//, '');
 		if (!databricksHost) {
 			throw new AuthError('DATABRICKS_HOST environment variable not configured');
 		}
 
-		const databricksResponse = await fetch(
-			`https://${databricksHost}/api/2.0/preview/scim/v2/Me`,
-			{
-				headers: {
-					Authorization: `Bearer ${token}`,
-				},
+		const databricksResponse = await fetch(`https://${databricksHost}/api/2.0/preview/scim/v2/Me`, {
+			headers: {
+				Authorization: `Bearer ${token}`,
 			},
-		);
+		});
 
 		if (!databricksResponse.ok) {
 			throw new AuthError('Invalid Databricks token');
@@ -214,24 +211,16 @@ export class AuthService {
 		});
 
 		if (!user) {
-			// Auto-provision user
-			const randomPassword = await this.passwordUtility.hash(
-				Math.random().toString(36).slice(-16),
-			);
-			user = await this.userRepository.save(
-				this.userRepository.create({
-					email: primaryEmail,
-					firstName: databricksUser.displayName?.split(' ')[0] ?? '',
-					lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
-					password: randomPassword,
-					role: { slug: 'global:member' },
-				}),
-				{ transaction: false },
-			);
-			user = await this.userRepository.findOneOrFail({
-				where: { id: user.id },
-				relations: ['role'],
+			// Auto-provision user with personal project
+			const randomPassword = await this.passwordUtility.hash(Math.random().toString(36).slice(-16));
+			const result = await this.userRepository.createUserWithProject({
+				email: primaryEmail,
+				firstName: databricksUser.displayName?.split(' ')[0] ?? '',
+				lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+				password: randomPassword,
+				role: { slug: 'global:member' },
 			});
+			user = result.user;
 			this.logger.info('Auto-provisioned user from Databricks', { email: primaryEmail });
 		}
 

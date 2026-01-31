@@ -97,7 +97,12 @@ const isExternalAuthEnabled = computed((): boolean => {
 	const isSamlEnabled = ssoStore.isSamlLoginEnabled && ssoStore.isDefaultAuthenticationSaml;
 	const isOidcEnabled =
 		ssoStore.isEnterpriseOidcEnabled && currentUser.value?.signInType === 'oidc';
-	return isLdapEnabled || isSamlEnabled || isOidcEnabled;
+	// Databricks auth is external when it's enabled and email login is disabled
+	const isDatabricksAuthOnly =
+		(settingsStore.databricksSettings.federatedLoginEnabled ||
+			settingsStore.databricksSettings.tokenLoginEnabled) &&
+		!settingsStore.authMethodsSettings.emailEnabled;
+	return isLdapEnabled || isSamlEnabled || isOidcEnabled || isDatabricksAuthOnly;
 });
 
 const isPersonalSecurityEnabled = computed((): boolean => {

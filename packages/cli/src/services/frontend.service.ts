@@ -38,6 +38,15 @@ export type PublicFrontendSettings = {
 	/** Controls initialization flow in settings store */
 	settingsMode: FrontendSettings['settingsMode'];
 
+	/** @deprecated Use databricks instead */
+	databricksHost: FrontendSettings['databricksHost'];
+
+	/** Databricks authentication settings */
+	databricks: FrontendSettings['databricks'];
+
+	/** Authentication methods settings */
+	authMethods: FrontendSettings['authMethods'];
+
 	/** Used to localize login page UI */
 	defaultLocale: FrontendSettings['defaultLocale'];
 
@@ -168,8 +177,21 @@ export class FrontendService {
 			telemetrySettings.config = { key, url, proxy, sourceConfig };
 		}
 
+		const databricksHost =
+			this.globalConfig.databricks.host.replace(/^https?:\/\//, '') || undefined;
+
 		this.settings = {
 			settingsMode: 'authenticated',
+			databricksHost, // deprecated, use databricks.host
+			databricks: {
+				host: databricksHost,
+				federatedLoginEnabled: this.globalConfig.databricks.federatedLoginEnabled,
+				tokenLoginEnabled: this.globalConfig.databricks.tokenLoginEnabled,
+			},
+			authMethods: {
+				emailEnabled: this.globalConfig.authMethods.emailEnabled,
+				signupEnabled: this.globalConfig.authMethods.signupEnabled,
+			},
 			inE2ETests,
 			isDocker: this.instanceSettings.isDocker,
 			databaseType: this.globalConfig.database.type,
@@ -528,6 +550,9 @@ export class FrontendService {
 	async getPublicSettings(includeMfaSettings: boolean): Promise<PublicFrontendSettings> {
 		// Get full settings to ensure all required properties are initialized
 		const {
+			databricksHost,
+			databricks,
+			authMethods,
 			defaultLocale,
 			userManagement: { authenticationMethod, showSetupOnFirstLoad, smtpSetup },
 			sso: { saml: ssoSaml, ldap: ssoLdap, oidc: ssoOidc },
@@ -539,6 +564,9 @@ export class FrontendService {
 
 		const publicSettings: PublicFrontendSettings = {
 			settingsMode: 'public',
+			databricksHost,
+			databricks,
+			authMethods,
 			defaultLocale,
 			userManagement: { authenticationMethod, showSetupOnFirstLoad, smtpSetup },
 			sso: {
