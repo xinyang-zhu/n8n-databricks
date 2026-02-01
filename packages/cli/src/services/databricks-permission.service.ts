@@ -65,6 +65,8 @@ export class DatabricksPermissionService {
 	private identityCache = new Map<string, { identity: DatabricksIdentity; expiresAt: number }>();
 	// Store Databricks tokens by n8n user ID (set during login, used for SCIM API calls)
 	private userTokenCache = new Map<string, { token: string; expiresAt: number }>();
+	// Cache for service principal token (used for listing users/groups/service-principals)
+	private serviceTokenCache: { token: string; expiresAt: number } | null = null;
 	private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 	private readonly TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours (match cookie TTL)
 
@@ -108,6 +110,73 @@ export class DatabricksPermissionService {
 			return `${baseUrl}?${params.toString()}`;
 		}
 		return baseUrl;
+	}
+
+	/**
+	 * Get a service principal token for SCIM API calls.
+	 * Uses OAuth2 client credentials flow with DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET.
+	 * Token is cached until expiration.
+	 */
+	async getServiceToken(): Promise<string> {
+		// Check cache first
+		if (this.serviceTokenCache && this.serviceTokenCache.expiresAt > Date.now()) {
+			return this.serviceTokenCache.token;
+		}
+
+		const { clientId, clientSecret } = this.globalConfig.databricks;
+		if (!clientId || !clientSecret) {
+			throw new Error(
+				'DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET must be configured for SCIM API access',
+			);
+		}
+
+		const tokenUrl = `https://${this.getDatabricksHost()}/oidc/v1/token`;
+
+		try {
+			const response = await axios.post<{ access_token: string; expires_in: number }>(
+				tokenUrl,
+				new URLSearchParams({
+					grant_type: 'client_credentials',
+					scope: 'all-apis',
+				}).toString(),
+				{
+					headers: {
+						'Content-Type': 'application/x-www-form-urlencoded',
+					},
+					auth: {
+						username: clientId,
+						password: clientSecret,
+					},
+				},
+			);
+
+			const { access_token, expires_in } = response.data;
+
+			// Cache the token (expire 1 minute early to avoid edge cases)
+			this.serviceTokenCache = {
+				token: access_token,
+				expiresAt: Date.now() + (expires_in - 60) * 1000,
+			};
+
+			this.logger.debug('[DBX-TOKEN] Service token acquired', {
+				expiresIn: expires_in,
+			});
+
+			return access_token;
+		} catch (error) {
+			const axiosError = error as {
+				response?: { status: number; data: unknown };
+				message?: string;
+			};
+			this.logger.error('Failed to acquire service token', {
+				error: axiosError.message,
+				status: axiosError.response?.status,
+				data: axiosError.response?.data,
+			});
+			throw new Error(
+				`Failed to acquire Databricks service token: ${axiosError.response?.status ?? axiosError.message}`,
+			);
+		}
 	}
 
 	// ============================================================

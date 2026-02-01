@@ -437,30 +437,29 @@ export class DatabricksPermissionsController {
 
 	/**
 	 * Fetch groups from Databricks workspace (cached for 5 minutes)
+	 * Uses service principal credentials for SCIM API access.
 	 * @see https://docs.databricks.com/api/workspace/groups/list
 	 */
 	@Get('/groups')
 	async getDatabricksGroups(
-		req: AuthenticatedRequest,
+		_req: AuthenticatedRequest,
 		_res: Response,
 		@Query query?: { filter?: string; startIndex?: string; count?: string },
 	) {
 		this.checkRbacEnabled();
 
-		const databricksToken = this.permissionService.getTokenFromRequest(req);
-		if (!databricksToken) {
-			throw new BadRequestError('Databricks token not provided');
-		}
-
 		// Check cache for unfiltered requests
+		const cacheKey = 'default';
 		if (!query?.filter && !query?.startIndex && !query?.count) {
-			const cached = this.groupsCache.get(databricksToken);
+			const cached = this.groupsCache.get(cacheKey);
 			if (cached && cached.expiresAt > Date.now()) {
 				return cached.data;
 			}
 		}
 
 		try {
+			const serviceToken = await this.permissionService.getServiceToken();
+
 			const params = new URLSearchParams();
 			if (query?.filter) params.append('filter', query.filter);
 			if (query?.startIndex !== undefined) params.append('startIndex', query.startIndex);
@@ -470,7 +469,7 @@ export class DatabricksPermissionsController {
 
 			const response = await axios.get<DatabricksGroupsResponse>(url, {
 				headers: {
-					Authorization: `Bearer ${databricksToken}`,
+					Authorization: `Bearer ${serviceToken}`,
 				},
 			});
 
@@ -484,7 +483,7 @@ export class DatabricksPermissionsController {
 
 			// Cache unfiltered results
 			if (!query?.filter && !query?.startIndex && !query?.count) {
-				this.groupsCache.set(databricksToken, {
+				this.groupsCache.set(cacheKey, {
 					data: result,
 					expiresAt: Date.now() + CACHE_TTL_MS,
 				});
@@ -510,30 +509,29 @@ export class DatabricksPermissionsController {
 
 	/**
 	 * Fetch users from Databricks workspace (cached for 5 minutes)
+	 * Uses service principal credentials for SCIM API access.
 	 * @see https://docs.databricks.com/api/workspace/users/list
 	 */
 	@Get('/users')
 	async getDatabricksUsers(
-		req: AuthenticatedRequest,
+		_req: AuthenticatedRequest,
 		_res: Response,
 		@Query query?: { filter?: string; startIndex?: string; count?: string },
 	) {
 		this.checkRbacEnabled();
 
-		const databricksToken = this.permissionService.getTokenFromRequest(req);
-		if (!databricksToken) {
-			throw new BadRequestError('Databricks token not provided');
-		}
-
 		// Check cache for unfiltered requests
+		const cacheKey = 'default';
 		if (!query?.filter && !query?.startIndex && !query?.count) {
-			const cached = this.usersCache.get(databricksToken);
+			const cached = this.usersCache.get(cacheKey);
 			if (cached && cached.expiresAt > Date.now()) {
 				return cached.data;
 			}
 		}
 
 		try {
+			const serviceToken = await this.permissionService.getServiceToken();
+
 			const params = new URLSearchParams();
 			if (query?.filter) params.append('filter', query.filter);
 			if (query?.startIndex !== undefined) params.append('startIndex', query.startIndex);
@@ -543,7 +541,7 @@ export class DatabricksPermissionsController {
 
 			const response = await axios.get<DatabricksUsersResponse>(url, {
 				headers: {
-					Authorization: `Bearer ${databricksToken}`,
+					Authorization: `Bearer ${serviceToken}`,
 				},
 			});
 
@@ -558,7 +556,7 @@ export class DatabricksPermissionsController {
 
 			// Cache unfiltered results
 			if (!query?.filter && !query?.startIndex && !query?.count) {
-				this.usersCache.set(databricksToken, {
+				this.usersCache.set(cacheKey, {
 					data: result,
 					expiresAt: Date.now() + CACHE_TTL_MS,
 				});
@@ -584,30 +582,29 @@ export class DatabricksPermissionsController {
 
 	/**
 	 * Fetch service principals from Databricks workspace (cached for 5 minutes)
+	 * Uses service principal credentials for SCIM API access.
 	 * @see https://docs.databricks.com/api/workspace/serviceprincipals/list
 	 */
 	@Get('/service-principals')
 	async getDatabricksServicePrincipals(
-		req: AuthenticatedRequest,
+		_req: AuthenticatedRequest,
 		_res: Response,
 		@Query query?: { filter?: string; startIndex?: string; count?: string },
 	) {
 		this.checkRbacEnabled();
 
-		const databricksToken = this.permissionService.getTokenFromRequest(req);
-		if (!databricksToken) {
-			throw new BadRequestError('Databricks token not provided');
-		}
-
 		// Check cache for unfiltered requests
+		const cacheKey = 'default';
 		if (!query?.filter && !query?.startIndex && !query?.count) {
-			const cached = this.servicePrincipalsCache.get(databricksToken);
+			const cached = this.servicePrincipalsCache.get(cacheKey);
 			if (cached && cached.expiresAt > Date.now()) {
 				return cached.data;
 			}
 		}
 
 		try {
+			const serviceToken = await this.permissionService.getServiceToken();
+
 			const params = new URLSearchParams();
 			if (query?.filter) params.append('filter', query.filter);
 			if (query?.startIndex !== undefined) params.append('startIndex', query.startIndex);
@@ -617,7 +614,7 @@ export class DatabricksPermissionsController {
 
 			const response = await axios.get<DatabricksServicePrincipalsResponse>(url, {
 				headers: {
-					Authorization: `Bearer ${databricksToken}`,
+					Authorization: `Bearer ${serviceToken}`,
 				},
 			});
 
@@ -632,7 +629,7 @@ export class DatabricksPermissionsController {
 
 			// Cache unfiltered results
 			if (!query?.filter && !query?.startIndex && !query?.count) {
-				this.servicePrincipalsCache.set(databricksToken, {
+				this.servicePrincipalsCache.set(cacheKey, {
 					data: result,
 					expiresAt: Date.now() + CACHE_TTL_MS,
 				});

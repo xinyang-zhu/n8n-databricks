@@ -17,6 +17,14 @@ export class DatabricksConfig {
 	/** Enable Databricks RBAC for workflows, credentials, and data tables */
 	@Env('N8N_DATABRICKS_RBAC_ENABLED')
 	rbacEnabled: boolean = true;
+
+	/** Service principal client ID for SCIM API calls (listing users/groups/service-principals) */
+	@Env('DATABRICKS_CLIENT_ID')
+	clientId: string = '';
+
+	/** Service principal client secret for SCIM API calls */
+	@Env('DATABRICKS_CLIENT_SECRET')
+	clientSecret: string = '';
 }
 
 @Config
