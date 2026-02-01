@@ -179,10 +179,11 @@ export class AuthService {
 	 * Validates the token against Databricks SCIM API and auto-provisions users if needed.
 	 */
 	private async authenticateWithDatabricksToken(token: string): Promise<User> {
-		const databricksHost = (process.env.DATABRICKS_HOST ?? '').replace(/^https?:\/\//, '');
-		if (!databricksHost) {
-			throw new AuthError('DATABRICKS_HOST environment variable not configured');
+		const databricksHostRaw = this.globalConfig.databricks.host;
+		if (!databricksHostRaw) {
+			throw new AuthError('Databricks host not configured');
 		}
+		const databricksHost = databricksHostRaw.replace(/^https?:\/\//, '');
 
 		const databricksResponse = await fetch(`https://${databricksHost}/api/2.0/preview/scim/v2/Me`, {
 			headers: {

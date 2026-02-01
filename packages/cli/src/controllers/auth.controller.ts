@@ -93,15 +93,11 @@ export class AuthController {
 			}
 
 			try {
-				const databricksHost = this.globalConfig.databricks.host.replace(/^https?:\/\//, '');
-				const databricksResponse = await fetch(
-					`https://${databricksHost}/api/2.0/preview/scim/v2/Me`,
-					{
-						headers: {
-							Authorization: `Bearer ${databricksToken}`,
-						},
+				const databricksResponse = await fetch(this.databricksPermissionService.getScimUrl('Me'), {
+					headers: {
+						Authorization: `Bearer ${databricksToken}`,
 					},
-				);
+				});
 
 				if (!databricksResponse.ok) {
 					throw new AuthError('Invalid Databricks token');
@@ -258,15 +254,11 @@ export class AuthController {
 		}
 
 		try {
-			const databricksHost = this.globalConfig.databricks.host.replace(/^https?:\/\//, '');
-			const databricksResponse = await fetch(
-				`https://${databricksHost}/api/2.0/preview/scim/v2/Me`,
-				{
-					headers: {
-						Authorization: `Bearer ${token}`,
-					},
+			const databricksResponse = await fetch(this.databricksPermissionService.getScimUrl('Me'), {
+				headers: {
+					Authorization: `Bearer ${token}`,
 				},
-			);
+			});
 
 			if (!databricksResponse.ok) {
 				throw new AuthError('Invalid Databricks token');
@@ -314,11 +306,21 @@ export class AuthController {
 			this.authService.issueCookie(res, user, false, req.browserId);
 
 			// Store Databricks token server-side for SCIM API calls
+			this.logger.debug('[DBX-TOKEN] Federated login - storing token', {
+				userId: user.id,
+				tokenLength: token.length,
+				tokenPrefix: token.substring(0, 10) + '...',
+			});
 			this.databricksPermissionService.setUserToken(user.id, token);
 
 			this.eventService.emit('user-logged-in', {
 				user,
 				authenticationMethod: 'databricks',
+			});
+
+			this.logger.debug('[DBX-TOKEN] Federated login complete', {
+				userId: user.id,
+				userEmail: primaryEmail,
 			});
 
 			return await this.userService.toPublic(user, {

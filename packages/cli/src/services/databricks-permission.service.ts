@@ -74,10 +74,55 @@ export class DatabricksPermissionService {
 		private readonly permissionRepository: DatabricksSecurablePermissionRepository,
 	) {}
 
+	// ============================================================
+	// Host and URL helpers - Single source of truth for Databricks URLs
+	// ============================================================
+
+	/**
+	 * Get the Databricks host without protocol.
+	 * Single source of truth - DO NOT duplicate this logic elsewhere.
+	 */
+	getDatabricksHost(): string {
+		const host = this.globalConfig.databricks.host;
+		if (!host) {
+			throw new Error('Databricks host not configured');
+		}
+		return host.replace(/^https?:\/\//, '');
+	}
+
+	/**
+	 * Get the base URL for Databricks SCIM API.
+	 */
+	getScimBaseUrl(): string {
+		return `https://${this.getDatabricksHost()}/api/2.0/preview/scim/v2`;
+	}
+
+	/**
+	 * Construct a full SCIM API URL for the given endpoint.
+	 * @param endpoint - The SCIM endpoint (e.g., 'Me', 'Users', 'Groups', 'ServicePrincipals')
+	 * @param params - Optional URLSearchParams to append
+	 */
+	getScimUrl(endpoint: string, params?: URLSearchParams): string {
+		const baseUrl = `${this.getScimBaseUrl()}/${endpoint}`;
+		if (params && params.toString()) {
+			return `${baseUrl}?${params.toString()}`;
+		}
+		return baseUrl;
+	}
+
+	// ============================================================
+	// Token management
+	// ============================================================
+
 	/**
 	 * Store a user's Databricks token (called during login)
 	 */
 	setUserToken(userId: string, token: string): void {
+		this.logger.debug('[DBX-TOKEN] Storing token for user', {
+			userId,
+			tokenLength: token.length,
+			tokenPrefix: token.substring(0, 10) + '...',
+		});
 		this.userTokenCache.set(userId, {
 			token,
 			expiresAt: Date.now() + this.TOKEN_TTL_MS,
@@ -89,6 +134,12 @@ export class DatabricksPermissionService {
 	 */
 	getUserToken(userId: string): string | undefined {
 		const cached = this.userTokenCache.get(userId);
+		this.logger.debug('[DBX-TOKEN] Getting token for user', {
+			userId,
+			found: !!cached,
+			expired: cached ? cached.expiresAt <= Date.now() : 'N/A',
+			cacheSize: this.userTokenCache.size,
+		});
 		if (cached && cached.expiresAt > Date.now()) {
 			return cached.token;
 		}
@@ -102,6 +153,52 @@ export class DatabricksPermissionService {
 	 */
 	clearUserToken(userId: string): void {
 		this.userTokenCache.delete(userId);
+	}
+
+	/**
+	 * Extract Databricks token from request headers or cache.
+	 * Single source of truth for token extraction - DO NOT duplicate this logic in controllers.
+	 *
+	 * Checks multiple sources in order:
+	 * 1. x-databricks-token header (explicit token from frontend)
+	 * 2. x-forwarded-access-token header (from reverse proxy with OAuth2)
+	 * 3. Server-side cache (stored during login)
+	 *
+	 * If a token is found in headers, it's automatically cached for the user.
+	 */
+	getTokenFromRequest(req: { headers: Record<string, unknown>; user?: { id: string } }):
+		| string
+		| undefined {
+		// Check for explicit token header
+		const headerToken = req.headers['x-databricks-token'] as string | undefined;
+		// Check for reverse proxy OAuth2 token (forwarded by oauth2-proxy, etc.)
+		const forwardedToken = req.headers['x-forwarded-access-token'] as string | undefined;
+
+		const token = headerToken || forwardedToken;
+
+		this.logger.debug('[DBX-TOKEN] getTokenFromRequest called', {
+			hasHeaderToken: !!headerToken,
+			hasForwardedToken: !!forwardedToken,
+			userId: req.user?.id,
+		});
+
+		if (token && req.user?.id) {
+			// Update cache with fresh token
+			this.setUserToken(req.user.id, token);
+			return token;
+		}
+
+		// Get from server-side cache
+		if (req.user?.id) {
+			const cachedToken = this.getUserToken(req.user.id);
+			this.logger.debug('[DBX-TOKEN] Retrieved from cache', {
+				userId: req.user.id,
+				found: !!cachedToken,
+			});
+			return cachedToken;
+		}
+
+		return undefined;
 	}
 
 	/**
@@ -257,21 +354,12 @@ export class DatabricksPermissionService {
 			return cached.identity;
 		}
 
-		const databricksHostRaw = this.globalConfig.databricks.host;
-		if (!databricksHostRaw) {
-			throw new Error('Databricks host not configured');
-		}
-		const databricksHost = databricksHostRaw.replace(/^https?:\/\//, '');
-
 		try {
-			const response = await axios.get<DatabricksCurrentUserResponse>(
-				`https://${databricksHost}/api/2.0/preview/scim/v2/Me`,
-				{
-					headers: {
-						Authorization: `Bearer ${databricksToken}`,
-					},
+			const response = await axios.get<DatabricksCurrentUserResponse>(this.getScimUrl('Me'), {
+				headers: {
+					Authorization: `Bearer ${databricksToken}`,
 				},
-			);
+			});
 
 			const identity: DatabricksIdentity = {
 				userId: response.data.id,

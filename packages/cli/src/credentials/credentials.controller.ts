@@ -66,26 +66,6 @@ export class CredentialsController {
 		private readonly databricksPermissionService: DatabricksPermissionService,
 	) {}
 
-	/**
-	 * Get Databricks token for the authenticated user.
-	 * If header provides a new token, update the cache.
-	 */
-	private getDatabricksToken(req: AuthenticatedRequest): string | undefined {
-		// If header provides a token, update the cache
-		const headerToken = req.headers['x-databricks-token'] as string | undefined;
-		if (headerToken && req.user?.id) {
-			this.databricksPermissionService.setUserToken(req.user.id, headerToken);
-			return headerToken;
-		}
-
-		// Get from server-side cache
-		if (req.user?.id) {
-			return this.databricksPermissionService.getUserToken(req.user.id);
-		}
-
-		return undefined;
-	}
-
 	@Get('/', { middlewares: listQueryMiddleware })
 	async getMany(
 		req: CredentialRequest.GetMany,
@@ -102,7 +82,7 @@ export class CredentialsController {
 
 		// If Databricks RBAC is enabled, also include credentials the user has Databricks access to
 		if (this.globalConfig.databricks.rbacEnabled) {
-			const databricksToken = this.getDatabricksToken(req);
+			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 			if (databricksToken) {
 				try {
 					const databricksAccessibleIds =

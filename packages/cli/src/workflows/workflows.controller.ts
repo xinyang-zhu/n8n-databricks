@@ -101,26 +101,6 @@ export class WorkflowsController {
 	) {}
 
 	/**
-	 * Get Databricks token for the authenticated user.
-	 * If header provides a new token, update the cache.
-	 */
-	private getDatabricksToken(req: AuthenticatedRequest): string | undefined {
-		// If header provides a token, update the cache
-		const headerToken = req.headers['x-databricks-token'] as string | undefined;
-		if (headerToken && req.user?.id) {
-			this.databricksPermissionService.setUserToken(req.user.id, headerToken);
-			return headerToken;
-		}
-
-		// Get from server-side cache
-		if (req.user?.id) {
-			return this.databricksPermissionService.getUserToken(req.user.id);
-		}
-
-		return undefined;
-	}
-
-	/**
 	 * Check if user has a Databricks scope on a workflow.
 	 * Uses n8n scope names directly (e.g., 'workflow:read', 'workflow:execute').
 	 */
@@ -133,7 +113,7 @@ export class WorkflowsController {
 			return false; // RBAC disabled, no Databricks scopes
 		}
 
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 		if (!databricksToken) {
 			return false;
 		}
@@ -281,7 +261,7 @@ export class WorkflowsController {
 
 		// Initialize Databricks permissions - grant MANAGE to creator
 		if (this.globalConfig.databricks.rbacEnabled) {
-			const databricksToken = this.getDatabricksToken(req);
+			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 			if (databricksToken) {
 				try {
 					const creatorDatabricksId =
@@ -353,7 +333,7 @@ export class WorkflowsController {
 
 			// If Databricks RBAC is enabled, also include workflows the user has Databricks access to
 			if (this.globalConfig.databricks.rbacEnabled) {
-				const databricksToken = this.getDatabricksToken(req);
+				const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 				if (databricksToken) {
 					const databricksAccessibleIds =
 						await this.databricksPermissionService.getAccessibleSecurableIds(

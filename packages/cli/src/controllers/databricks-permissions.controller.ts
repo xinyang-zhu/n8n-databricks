@@ -110,26 +110,6 @@ export class DatabricksPermissionsController {
 	}
 
 	/**
-	 * Get Databricks token for the authenticated user.
-	 * If header provides a new token, update the cache.
-	 */
-	private getDatabricksToken(req: AuthenticatedRequest): string | undefined {
-		// If header provides a token, update the cache
-		const headerToken = req.headers['x-databricks-token'] as string | undefined;
-		if (headerToken && req.user?.id) {
-			this.permissionService.setUserToken(req.user.id, headerToken);
-			return headerToken;
-		}
-
-		// Get from server-side cache
-		if (req.user?.id) {
-			return this.permissionService.getUserToken(req.user.id);
-		}
-
-		return undefined;
-	}
-
-	/**
 	 * Validate securable type
 	 */
 	private validateSecurableType(securableType: string): DatabricksSecurableType {
@@ -140,17 +120,6 @@ export class DatabricksPermissionsController {
 			);
 		}
 		return securableType as DatabricksSecurableType;
-	}
-
-	/**
-	 * Get Databricks host (stripped of protocol)
-	 */
-	private getDatabricksHost(): string {
-		const databricksHostRaw = this.globalConfig.databricks.host;
-		if (!databricksHostRaw) {
-			throw new BadRequestError('Databricks host not configured');
-		}
-		return databricksHostRaw.replace(/^https?:\/\//, '');
 	}
 
 	// ============================================================
@@ -169,7 +138,7 @@ export class DatabricksPermissionsController {
 	) {
 		this.checkRbacEnabled();
 		const securableType = this.validateSecurableType(securableTypeParam);
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 
 		// Note: We rely on n8n's built-in access control to determine if the user
 		// can access this resource. If they can see the workflow/credential/etc,
@@ -217,7 +186,7 @@ export class DatabricksPermissionsController {
 	) {
 		this.checkRbacEnabled();
 		const securableType = this.validateSecurableType(securableTypeParam);
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 
 		if (!databricksToken) {
 			throw new BadRequestError('Databricks token not provided');
@@ -288,7 +257,7 @@ export class DatabricksPermissionsController {
 	) {
 		this.checkRbacEnabled();
 		const securableType = this.validateSecurableType(securableTypeParam);
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 
 		if (!databricksToken) {
 			throw new BadRequestError('Databricks token not provided');
@@ -359,7 +328,7 @@ export class DatabricksPermissionsController {
 	) {
 		this.checkRbacEnabled();
 		const securableType = this.validateSecurableType(securableTypeParam);
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 
 		if (!databricksToken) {
 			throw new BadRequestError('Databricks token not provided');
@@ -478,8 +447,7 @@ export class DatabricksPermissionsController {
 	) {
 		this.checkRbacEnabled();
 
-		const databricksHost = this.getDatabricksHost();
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 		if (!databricksToken) {
 			throw new BadRequestError('Databricks token not provided');
 		}
@@ -498,7 +466,7 @@ export class DatabricksPermissionsController {
 			if (query?.startIndex !== undefined) params.append('startIndex', query.startIndex);
 			if (query?.count !== undefined) params.append('count', query.count);
 
-			const url = `https://${databricksHost}/api/2.0/preview/scim/v2/Groups${params.toString() ? '?' + params.toString() : ''}`;
+			const url = this.permissionService.getScimUrl('Groups', params);
 
 			const response = await axios.get<DatabricksGroupsResponse>(url, {
 				headers: {
@@ -551,8 +519,7 @@ export class DatabricksPermissionsController {
 	) {
 		this.checkRbacEnabled();
 
-		const databricksHost = this.getDatabricksHost();
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 		if (!databricksToken) {
 			throw new BadRequestError('Databricks token not provided');
 		}
@@ -571,7 +538,7 @@ export class DatabricksPermissionsController {
 			if (query?.startIndex !== undefined) params.append('startIndex', query.startIndex);
 			if (query?.count !== undefined) params.append('count', query.count);
 
-			const url = `https://${databricksHost}/api/2.0/preview/scim/v2/Users${params.toString() ? '?' + params.toString() : ''}`;
+			const url = this.permissionService.getScimUrl('Users', params);
 
 			const response = await axios.get<DatabricksUsersResponse>(url, {
 				headers: {
@@ -625,8 +592,7 @@ export class DatabricksPermissionsController {
 	) {
 		this.checkRbacEnabled();
 
-		const databricksHost = this.getDatabricksHost();
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 		if (!databricksToken) {
 			throw new BadRequestError('Databricks token not provided');
 		}
@@ -645,7 +611,7 @@ export class DatabricksPermissionsController {
 			if (query?.startIndex !== undefined) params.append('startIndex', query.startIndex);
 			if (query?.count !== undefined) params.append('count', query.count);
 
-			const url = `https://${databricksHost}/api/2.0/preview/scim/v2/ServicePrincipals${params.toString() ? '?' + params.toString() : ''}`;
+			const url = this.permissionService.getScimUrl('ServicePrincipals', params);
 
 			const response = await axios.get<DatabricksServicePrincipalsResponse>(url, {
 				headers: {
@@ -694,19 +660,13 @@ export class DatabricksPermissionsController {
 	async getDatabricksCurrentUser(req: AuthenticatedRequest, _res: Response) {
 		this.checkRbacEnabled();
 
-		const databricksHostRaw = this.globalConfig.databricks.host;
-		if (!databricksHostRaw) {
-			throw new BadRequestError('Databricks host not configured');
-		}
-		const databricksHost = databricksHostRaw.replace(/^https?:\/\//, '');
-
-		const databricksToken = this.getDatabricksToken(req);
+		const databricksToken = this.permissionService.getTokenFromRequest(req);
 		if (!databricksToken) {
 			throw new BadRequestError('Databricks token not provided');
 		}
 
 		try {
-			const response = await axios.get(`https://${databricksHost}/api/2.0/preview/scim/v2/Me`, {
+			const response = await axios.get(this.permissionService.getScimUrl('Me'), {
 				headers: {
 					Authorization: `Bearer ${databricksToken}`,
 				},
