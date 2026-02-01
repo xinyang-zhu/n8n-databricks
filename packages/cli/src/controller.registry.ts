@@ -240,9 +240,15 @@ export class ControllerRegistry {
 				// Check Databricks permissions if RBAC is enabled
 				let hasDatabricksAccess = false;
 				if (this.globalConfig.databricks.rbacEnabled) {
+					// If header provides a token, update the cache
+					const headerToken = req.headers['x-databricks-token'] as string | undefined;
+					if (headerToken) {
+						this.databricksPermissionService.setUserToken(req.user.id, headerToken);
+					}
+
+					// Get token from server-side cache
 					const databricksToken =
-						req.cookies?.['n8n-databricks-token'] ||
-						(req.headers['x-databricks-token'] as string | undefined);
+						headerToken || this.databricksPermissionService.getUserToken(req.user.id);
 
 					if (databricksToken) {
 						// Determine securable type and ID from the scope and params

@@ -18,6 +18,7 @@ import { Response } from 'express';
 
 import { handleEmailLogin } from '@/auth';
 import { AuthService } from '@/auth/auth.service';
+import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 import { PasswordUtility } from '@/services/password.utility';
 import { RESPONSE_ERROR_MESSAGES } from '@/constants';
 import { AuthError } from '@/errors/response-errors/auth.error';
@@ -49,6 +50,7 @@ export class AuthController {
 		private readonly userRepository: UserRepository,
 		private readonly eventService: EventService,
 		private readonly passwordUtility: PasswordUtility,
+		private readonly databricksPermissionService: DatabricksPermissionService,
 		private readonly postHog?: PostHogClient,
 	) {}
 
@@ -146,13 +148,8 @@ export class AuthController {
 
 				this.authService.issueCookie(res, user, false, req.browserId);
 
-				// Store Databricks token in a separate cookie for API calls
-				res.cookie('n8n-databricks-token', databricksToken, {
-					httpOnly: true,
-					secure: this.globalConfig.auth.cookie.secure,
-					sameSite: 'lax',
-					maxAge: 24 * 60 * 60 * 1000, // 24 hours
-				});
+				// Store Databricks token server-side for SCIM API calls
+				this.databricksPermissionService.setUserToken(user.id, databricksToken);
 
 				this.eventService.emit('user-logged-in', {
 					user,
@@ -316,13 +313,8 @@ export class AuthController {
 
 			this.authService.issueCookie(res, user, false, req.browserId);
 
-			// Store Databricks token in a separate cookie for SCIM API calls
-			res.cookie('n8n-databricks-token', token, {
-				httpOnly: true,
-				secure: this.globalConfig.auth.cookie.secure,
-				sameSite: 'lax',
-				maxAge: 24 * 60 * 60 * 1000, // 24 hours
-			});
+			// Store Databricks token server-side for SCIM API calls
+			this.databricksPermissionService.setUserToken(user.id, token);
 
 			this.eventService.emit('user-logged-in', {
 				user,

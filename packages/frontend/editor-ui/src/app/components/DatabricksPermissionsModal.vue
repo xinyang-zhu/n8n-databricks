@@ -7,7 +7,11 @@ import { createEventBus } from '@n8n/utils/event-bus';
 import Modal from './Modal.vue';
 import { useRootStore } from '@n8n/stores/useRootStore';
 import * as databricksApi from '@n8n/rest-api-client/api/databricks-permissions';
-import { type DatabricksPermissionGroup, type DatabricksSecurableType } from 'n8n-workflow';
+import {
+	type DatabricksPermissionGroup,
+	type DatabricksSecurableType,
+	deepCopy,
+} from 'n8n-workflow';
 
 const props = defineProps<{
 	modalName: string;
@@ -51,7 +55,7 @@ interface PrincipalOption {
 	value: string;
 	label: string;
 	type: 'user' | 'group' | 'servicePrincipal';
-	icon: string;
+	icon: 'user' | 'users' | 'robot';
 }
 
 /**
@@ -80,7 +84,7 @@ const principalOptions = computed((): PrincipalOption[] => {
 			value: `user:${u.id}`,
 			label: `${u.displayName || u.email}`,
 			type: 'user' as const,
-			icon: 'user',
+			icon: 'user' as const,
 		}));
 	const groups = availableGroups.value
 		.filter((g) => g.id && g.displayName)
@@ -88,7 +92,7 @@ const principalOptions = computed((): PrincipalOption[] => {
 			value: `group:${g.id}`,
 			label: `${g.displayName}`,
 			type: 'group' as const,
-			icon: 'users',
+			icon: 'users' as const,
 		}));
 	const servicePrincipals = availableServicePrincipals.value
 		.filter((sp) => sp.id && sp.displayName)
@@ -96,7 +100,7 @@ const principalOptions = computed((): PrincipalOption[] => {
 			value: `servicePrincipal:${sp.id}`,
 			label: `${sp.displayName}`,
 			type: 'servicePrincipal' as const,
-			icon: 'robot',
+			icon: 'robot' as const,
 		}));
 	return [...users, ...groups, ...servicePrincipals];
 });
@@ -141,7 +145,7 @@ const initialize = async () => {
 			]);
 		permissionGroups.value = permResponse.permissionGroups;
 		// Create a deep copy for local editing
-		localPermissionGroups.value = JSON.parse(JSON.stringify(permResponse.permissionGroups));
+		localPermissionGroups.value = deepCopy(permResponse.permissionGroups);
 		currentUserScopes.value = permResponse.currentUserScopes;
 		availableScopes.value = permResponse.availableScopes;
 		canManage.value = permResponse.canManage;
@@ -434,7 +438,7 @@ onMounted(async () => {
 									:disabled="isSaving"
 									@click="removePermissionLocal(group)"
 								>
-									<N8nIcon icon="trash" />
+									<N8nIcon icon="trash-2" />
 								</button>
 							</div>
 						</div>

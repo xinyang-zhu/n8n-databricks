@@ -110,16 +110,23 @@ export class DatabricksPermissionsController {
 	}
 
 	/**
-	 * Get Databricks token from request (cookie or header)
+	 * Get Databricks token for the authenticated user.
+	 * If header provides a new token, update the cache.
 	 */
 	private getDatabricksToken(req: AuthenticatedRequest): string | undefined {
-		// First try cookie (set during login)
-		const cookieToken = req.cookies?.['n8n-databricks-token'];
-		if (cookieToken) return cookieToken;
-
-		// Fall back to header (for API calls)
+		// If header provides a token, update the cache
 		const headerToken = req.headers['x-databricks-token'] as string | undefined;
-		return headerToken;
+		if (headerToken && req.user?.id) {
+			this.permissionService.setUserToken(req.user.id, headerToken);
+			return headerToken;
+		}
+
+		// Get from server-side cache
+		if (req.user?.id) {
+			return this.permissionService.getUserToken(req.user.id);
+		}
+
+		return undefined;
 	}
 
 	/**

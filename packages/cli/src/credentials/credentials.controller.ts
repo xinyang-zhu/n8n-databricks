@@ -67,13 +67,23 @@ export class CredentialsController {
 	) {}
 
 	/**
-	 * Get Databricks token from request (cookie or header)
+	 * Get Databricks token for the authenticated user.
+	 * If header provides a new token, update the cache.
 	 */
 	private getDatabricksToken(req: AuthenticatedRequest): string | undefined {
-		const cookieToken = req.cookies?.['n8n-databricks-token'];
-		if (cookieToken) return cookieToken;
+		// If header provides a token, update the cache
 		const headerToken = req.headers['x-databricks-token'] as string | undefined;
-		return headerToken;
+		if (headerToken && req.user?.id) {
+			this.databricksPermissionService.setUserToken(req.user.id, headerToken);
+			return headerToken;
+		}
+
+		// Get from server-side cache
+		if (req.user?.id) {
+			return this.databricksPermissionService.getUserToken(req.user.id);
+		}
+
+		return undefined;
 	}
 
 	@Get('/', { middlewares: listQueryMiddleware })

@@ -63,13 +63,46 @@ const LEGACY_SCOPE_MAPPING: Record<string, Record<string, string[]>> = {
 @Service()
 export class DatabricksPermissionService {
 	private identityCache = new Map<string, { identity: DatabricksIdentity; expiresAt: number }>();
+	// Store Databricks tokens by n8n user ID (set during login, used for SCIM API calls)
+	private userTokenCache = new Map<string, { token: string; expiresAt: number }>();
 	private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+	private readonly TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours (match cookie TTL)
 
 	constructor(
 		private readonly logger: Logger,
 		private readonly globalConfig: GlobalConfig,
 		private readonly permissionRepository: DatabricksSecurablePermissionRepository,
 	) {}
+
+	/**
+	 * Store a user's Databricks token (called during login)
+	 */
+	setUserToken(userId: string, token: string): void {
+		this.userTokenCache.set(userId, {
+			token,
+			expiresAt: Date.now() + this.TOKEN_TTL_MS,
+		});
+	}
+
+	/**
+	 * Get a user's stored Databricks token
+	 */
+	getUserToken(userId: string): string | undefined {
+		const cached = this.userTokenCache.get(userId);
+		if (cached && cached.expiresAt > Date.now()) {
+			return cached.token;
+		}
+		// Expired or not found
+		this.userTokenCache.delete(userId);
+		return undefined;
+	}
+
+	/**
+	 * Clear a user's stored Databricks token (called during logout)
+	 */
+	clearUserToken(userId: string): void {
+		this.userTokenCache.delete(userId);
+	}
 
 	/**
 	 * Get available scopes for a securable type
