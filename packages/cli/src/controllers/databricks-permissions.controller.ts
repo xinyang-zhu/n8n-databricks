@@ -501,8 +501,9 @@ export class DatabricksPermissionsController {
 				status: axiosError.response?.status,
 				data: axiosError.response?.data,
 			});
+			const databricksError = JSON.stringify(axiosError.response?.data ?? axiosError.message);
 			throw new BadRequestError(
-				`Failed to fetch groups from Databricks: ${axiosError.response?.status ?? axiosError.message}`,
+				`Failed to fetch groups from Databricks: ${axiosError.response?.status} - ${databricksError}`,
 			);
 		}
 	}
@@ -574,8 +575,9 @@ export class DatabricksPermissionsController {
 				status: axiosError.response?.status,
 				data: axiosError.response?.data,
 			});
+			const databricksError = JSON.stringify(axiosError.response?.data ?? axiosError.message);
 			throw new BadRequestError(
-				`Failed to fetch users from Databricks: ${axiosError.response?.status ?? axiosError.message}`,
+				`Failed to fetch users from Databricks: ${axiosError.response?.status} - ${databricksError}`,
 			);
 		}
 	}
@@ -647,8 +649,9 @@ export class DatabricksPermissionsController {
 				status: axiosError.response?.status,
 				data: axiosError.response?.data,
 			});
+			const databricksError = JSON.stringify(axiosError.response?.data ?? axiosError.message);
 			throw new BadRequestError(
-				`Failed to fetch service principals from Databricks: ${axiosError.response?.status ?? axiosError.message}`,
+				`Failed to fetch service principals from Databricks: ${axiosError.response?.status} - ${databricksError}`,
 			);
 		}
 	}
