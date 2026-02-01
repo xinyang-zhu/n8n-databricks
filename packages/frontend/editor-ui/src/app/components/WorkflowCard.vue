@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import {
+	DATABRICKS_PERMISSIONS_MODAL_KEY,
 	DUPLICATE_MODAL_KEY,
 	MODAL_CONFIRM,
 	VIEWS,
 	WORKFLOW_SHARE_MODAL_KEY,
 	WORKFLOW_HISTORY_VERSION_UNPUBLISH,
 } from '@/app/constants';
+import { useSettingsStore } from '@/app/stores/settings.store';
 import { PROJECT_MOVE_RESOURCE_MODAL } from '@/features/collaboration/projects/projects.constants';
 import { useMessage } from '@/app/composables/useMessage';
 import { useToast } from '@/app/composables/useToast';
@@ -61,6 +63,7 @@ const WORKFLOW_LIST_ITEM_ACTIONS = {
 	ENABLE_MCP_ACCESS: 'enableMCPAccess',
 	REMOVE_MCP_ACCESS: 'removeMCPAccess',
 	UNPUBLISH: 'unpublish',
+	MANAGE_PERMISSIONS: 'managePermissions',
 };
 
 const props = withDefaults(
@@ -118,6 +121,7 @@ const workflowsListStore = useWorkflowsListStore();
 const projectsStore = useProjectsStore();
 const foldersStore = useFoldersStore();
 const mcpStore = useMCPStore();
+const settingsStore = useSettingsStore();
 const workflowActivate = useWorkflowActivate();
 const hiddenBreadcrumbsItemsAsync = ref<Promise<PathItem[]>>(new Promise(() => {}));
 const cachedHiddenBreadcrumbsItems = ref<PathItem[]>([]);
@@ -265,6 +269,13 @@ const actions = computed(() => {
 		}
 	}
 
+	if (settingsStore.isDatabricksRbacEnabled && !props.readOnly && !props.data.isArchived) {
+		items.push({
+			label: locale.baseText('workflows.item.managePermissions'),
+			value: WORKFLOW_LIST_ITEM_ACTIONS.MANAGE_PERMISSIONS,
+		});
+	}
+
 	return items;
 });
 const formattedCreatedAtDate = computed(() => {
@@ -395,6 +406,16 @@ async function onAction(action: string) {
 			break;
 		case WORKFLOW_LIST_ITEM_ACTIONS.UNPUBLISH:
 			await unpublishWorkflow();
+			break;
+		case WORKFLOW_LIST_ITEM_ACTIONS.MANAGE_PERMISSIONS:
+			uiStore.openModalWithData({
+				name: DATABRICKS_PERMISSIONS_MODAL_KEY,
+				data: {
+					securableType: 'workflow',
+					securableId: props.data.id,
+					securableName: props.data.name,
+				},
+			});
 			break;
 	}
 }

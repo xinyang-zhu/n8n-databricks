@@ -109,11 +109,18 @@ export class AuthController {
 					emails?: Array<{ value: string; primary?: boolean }>;
 					displayName?: string;
 					userName?: string;
+					id?: string;
 				};
-				const primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
+				let primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
 
-				if (!primaryEmail) {
-					throw new AuthError('Could not retrieve email from Databricks profile');
+				// Handle service principals which have UUIDs instead of real emails
+				if (!primaryEmail || !primaryEmail.includes('@')) {
+					// For service principals, construct an email-like identifier
+					if (databricksUser.displayName && databricksUser.id) {
+						primaryEmail = `sp-${databricksUser.id}@databricks.local`;
+					} else {
+						throw new AuthError('Could not retrieve email from Databricks profile');
+					}
 				}
 
 				user =
@@ -138,6 +145,14 @@ export class AuthController {
 				}
 
 				this.authService.issueCookie(res, user, false, req.browserId);
+
+				// Store Databricks token in a separate cookie for API calls
+				res.cookie('n8n-databricks-token', databricksToken, {
+					httpOnly: true,
+					secure: this.globalConfig.auth.cookie.secure,
+					sameSite: 'lax',
+					maxAge: 24 * 60 * 60 * 1000, // 24 hours
+				});
 
 				this.eventService.emit('user-logged-in', {
 					user,
@@ -264,11 +279,18 @@ export class AuthController {
 				emails?: Array<{ value: string; primary?: boolean }>;
 				displayName?: string;
 				userName?: string;
+				id?: string;
 			};
-			const primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
+			let primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
 
-			if (!primaryEmail) {
-				throw new AuthError('Could not retrieve email from Databricks profile');
+			// Handle service principals which have UUIDs instead of real emails
+			if (!primaryEmail || !primaryEmail.includes('@')) {
+				// For service principals, construct an email-like identifier
+				if (databricksUser.displayName && databricksUser.id) {
+					primaryEmail = `sp-${databricksUser.id}@databricks.local`;
+				} else {
+					throw new AuthError('Could not retrieve email from Databricks profile');
+				}
 			}
 
 			let user =

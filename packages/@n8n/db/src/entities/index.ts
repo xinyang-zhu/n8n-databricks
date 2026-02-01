@@ -5,6 +5,7 @@ import { AuthIdentity } from './auth-identity';
 import { AuthProviderSyncHistory } from './auth-provider-sync-history';
 import { BinaryDataFile, SourceTypeSchema, type SourceType } from './binary-data-file';
 import { CredentialsEntity } from './credentials-entity';
+import { DatabricksSecurablePermission } from './databricks-securable-permission';
 import { ExecutionAnnotation } from './execution-annotation.ee';
 import { ExecutionData } from './execution-data';
 import { ExecutionEntity } from './execution-entity';
@@ -49,6 +50,7 @@ export {
 	WebhookEntity,
 	AuthIdentity,
 	CredentialsEntity,
+	DatabricksSecurablePermission,
 	Folder,
 	Project,
 	ProjectRelation,
@@ -88,6 +90,7 @@ export const entities = {
 	WebhookEntity,
 	AuthIdentity,
 	CredentialsEntity,
+	DatabricksSecurablePermission,
 	Folder,
 	Project,
 	ProjectRelation,

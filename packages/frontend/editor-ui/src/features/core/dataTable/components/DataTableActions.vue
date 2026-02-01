@@ -2,7 +2,9 @@
 import { useMessage } from '@/app/composables/useMessage';
 import { useTelemetry } from '@/app/composables/useTelemetry';
 import { useToast } from '@/app/composables/useToast';
-import { MODAL_CONFIRM } from '@/app/constants';
+import { DATABRICKS_PERMISSIONS_MODAL_KEY, MODAL_CONFIRM } from '@/app/constants';
+import { useUIStore } from '@/app/stores/ui.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
 import { DATA_TABLE_CARD_ACTIONS } from '@/features/core/dataTable/constants';
 import { useDataTableStore } from '@/features/core/dataTable/dataTable.store';
 import type { DataTable } from '@/features/core/dataTable/dataTable.types';
@@ -11,6 +13,8 @@ import { useI18n } from '@n8n/i18n';
 import { computed } from 'vue';
 
 import { N8nActionToggle } from '@n8n/design-system';
+
+const MANAGE_PERMISSIONS_ACTION = 'managePermissions';
 type Props = {
 	dataTable: DataTable;
 	isReadOnly?: boolean;
@@ -32,6 +36,8 @@ const emit = defineEmits<{
 }>();
 
 const dataTableStore = useDataTableStore();
+const uiStore = useUIStore();
+const settingsStore = useSettingsStore();
 
 const i18n = useI18n();
 const message = useMessage();
@@ -58,6 +64,15 @@ const actions = computed<Array<UserAction<IUser>>>(() => {
 			disabled: !dataTableStore.projectPermissions.dataTable.update || props.isReadOnly,
 		});
 	}
+
+	if (settingsStore.isDatabricksRbacEnabled && !props.isReadOnly) {
+		availableActions.push({
+			label: i18n.baseText('dataTable.item.managePermissions'),
+			value: MANAGE_PERMISSIONS_ACTION,
+			disabled: false,
+		});
+	}
+
 	return availableActions;
 });
 
@@ -90,6 +105,17 @@ const onAction = async (action: string) => {
 			if (promptResponse === MODAL_CONFIRM) {
 				await deleteDataTable();
 			}
+			break;
+		}
+		case MANAGE_PERMISSIONS_ACTION: {
+			uiStore.openModalWithData({
+				name: DATABRICKS_PERMISSIONS_MODAL_KEY,
+				data: {
+					securableType: 'data_table',
+					securableId: props.dataTable.id,
+					securableName: props.dataTable.name,
+				},
+			});
 			break;
 		}
 	}

@@ -3,6 +3,7 @@ export * from './cloudPlans';
 export * from './communityNodes';
 export * from './credentialResolvers';
 export * from './ctas';
+export * from './databricks-permissions';
 export * from './eventbus.ee';
 export * from './events';
 export * from './externalSecrets.ee';

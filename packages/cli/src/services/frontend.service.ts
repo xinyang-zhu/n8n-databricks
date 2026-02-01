@@ -187,6 +187,7 @@ export class FrontendService {
 				host: databricksHost,
 				federatedLoginEnabled: this.globalConfig.databricks.federatedLoginEnabled,
 				tokenLoginEnabled: this.globalConfig.databricks.tokenLoginEnabled,
+				rbacEnabled: this.globalConfig.databricks.rbacEnabled,
 			},
 			authMethods: {
 				emailEnabled: this.globalConfig.authMethods.emailEnabled,

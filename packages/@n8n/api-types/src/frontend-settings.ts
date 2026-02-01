@@ -46,6 +46,8 @@ export interface IDatabricksSettings {
 	federatedLoginEnabled: boolean;
 	/** Databricks token login enabled (user PAT) */
 	tokenLoginEnabled: boolean;
+	/** Databricks RBAC enabled for workflows */
+	rbacEnabled: boolean;
 }
 
 export interface IEnterpriseSettings {

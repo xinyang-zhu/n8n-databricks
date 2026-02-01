@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import dateformat from 'dateformat';
-import { MODAL_CONFIRM } from '@/app/constants';
+import { DATABRICKS_PERMISSIONS_MODAL_KEY, MODAL_CONFIRM } from '@/app/constants';
 import { PROJECT_MOVE_RESOURCE_MODAL } from '@/features/collaboration/projects/projects.constants';
 import { useMessage } from '@/app/composables/useMessage';
 import CredentialIcon from './CredentialIcon.vue';
 import { getResourcePermissions } from '@n8n/permissions';
 import { useUIStore } from '@/app/stores/ui.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
 import { useCredentialsStore } from '../credentials.store';
 import TimeAgo from '@/app/components/TimeAgo.vue';
 import { useProjectsStore } from '@/features/collaboration/projects/projects.store';
@@ -28,6 +29,7 @@ const CREDENTIAL_LIST_ITEM_ACTIONS = {
 	OPEN: 'open',
 	DELETE: 'delete',
 	MOVE: 'move',
+	MANAGE_PERMISSIONS: 'managePermissions',
 };
 
 const emit = defineEmits<{
@@ -49,6 +51,7 @@ const props = withDefaults(
 const locale = useI18n();
 const message = useMessage();
 const uiStore = useUIStore();
+const settingsStore = useSettingsStore();
 const credentialsStore = useCredentialsStore();
 const projectsStore = useProjectsStore();
 const { check: checkEnvFeatureFlag } = useEnvFeatureFlag();
@@ -84,6 +87,13 @@ const actions = computed(() => {
 		});
 	}
 
+	if (settingsStore.isDatabricksRbacEnabled && !props.readOnly) {
+		items.push({
+			label: locale.baseText('credentials.item.managePermissions'),
+			value: CREDENTIAL_LIST_ITEM_ACTIONS.MANAGE_PERMISSIONS,
+		});
+	}
+
 	return items;
 });
 const formattedCreatedAtDate = computed(() => {
@@ -109,6 +119,16 @@ async function onAction(action: string) {
 			break;
 		case CREDENTIAL_LIST_ITEM_ACTIONS.MOVE:
 			moveResource();
+			break;
+		case CREDENTIAL_LIST_ITEM_ACTIONS.MANAGE_PERMISSIONS:
+			uiStore.openModalWithData({
+				name: DATABRICKS_PERMISSIONS_MODAL_KEY,
+				data: {
+					securableType: 'credential',
+					securableId: props.data.id,
+					securableName: props.data.name,
+				},
+			});
 			break;
 	}
 }

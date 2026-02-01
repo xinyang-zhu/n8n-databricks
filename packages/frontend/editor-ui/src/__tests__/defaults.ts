@@ -8,6 +8,7 @@ export const defaultSettings: FrontendSettings = {
 		host: undefined,
 		federatedLoginEnabled: false,
 		tokenLoginEnabled: false,
+		rbacEnabled: true,
 	},
 	authMethods: {
 		emailEnabled: true,

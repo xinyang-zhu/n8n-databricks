@@ -58,8 +58,11 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 				host: undefined,
 				federatedLoginEnabled: false,
 				tokenLoginEnabled: false,
+				rbacEnabled: false,
 			},
 	);
+
+	const isDatabricksRbacEnabled = computed(() => settings.value?.databricks?.rbacEnabled ?? false);
 
 	const authMethodsSettings = computed(
 		() =>
@@ -358,6 +361,7 @@ export const useSettingsStore = defineStore(STORES.SETTINGS, () => {
 		isDocker,
 		databricksHost,
 		databricksSettings,
+		isDatabricksRbacEnabled,
 		authMethodsSettings,
 		isDevRelease,
 		isEnterpriseFeatureEnabled,

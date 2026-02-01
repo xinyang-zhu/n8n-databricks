@@ -34,6 +34,7 @@ import {
 	WORKFLOW_PUBLISH_MODAL_KEY,
 	WORKFLOW_HISTORY_PUBLISH_MODAL_KEY,
 	CREDENTIAL_RESOLVER_EDIT_MODAL_KEY,
+	DATABRICKS_PERMISSIONS_MODAL_KEY,
 } from '@/app/constants';
 import {
 	ANNOTATION_TAGS_MANAGER_MODAL_KEY,
@@ -120,6 +121,7 @@ import WorkflowPublishModal from '@/app/components/MainHeader/WorkflowPublishMod
 import WorkflowHistoryPublishModal from '@/features/workflows/workflowHistory/components/WorkflowHistoryPublishModal.vue';
 import UpdatesPanel from './UpdatesPanel.vue';
 import CredentialResolverEditModal from '@/app/components/CredentialResolverEditModal.vue';
+import DatabricksPermissionsModal from '@/app/components/DatabricksPermissionsModal.vue';
 </script>
 
 <template>
@@ -444,6 +446,12 @@ import CredentialResolverEditModal from '@/app/components/CredentialResolverEdit
 		<ModalRoot :name="CREDENTIAL_RESOLVER_EDIT_MODAL_KEY">
 			<template #default="{ modalName, data }">
 				<CredentialResolverEditModal :modal-name="modalName" :data="data" />
+			</template>
+		</ModalRoot>
+
+		<ModalRoot :name="DATABRICKS_PERMISSIONS_MODAL_KEY">
+			<template #default="{ modalName, data }">
+				<DatabricksPermissionsModal :modal-name="modalName" :data="data" />
 			</template>
 		</ModalRoot>
 

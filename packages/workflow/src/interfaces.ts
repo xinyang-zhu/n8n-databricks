@@ -2865,11 +2865,124 @@ export interface IWorkflowSettings {
 	credentialResolverId?: string;
 }
 
+/**
+ * Databricks securable types that can have permissions assigned
+ */
+export type DatabricksSecurableType = 'workflow' | 'credential' | 'data_table';
+
+/**
+ * Available scopes for each securable type (matches n8n's scope system).
+ * Uses n8n scope names directly for seamless MERGE(DBX, N8N) logic.
+ */
+export const DATABRICKS_SECURABLE_SCOPES: Record<DatabricksSecurableType, readonly string[]> = {
+	workflow: [
+		'workflow:read',
+		'workflow:update',
+		'workflow:delete',
+		'workflow:execute',
+		'workflow:share',
+		'workflow:move',
+		'workflow:activate',
+		'workflow:deactivate',
+		'workflow:publish',
+	] as const,
+	credential: [
+		'credential:read',
+		'credential:update',
+		'credential:delete',
+		'credential:share',
+		'credential:move',
+	] as const,
+	data_table: [
+		'dataTable:read',
+		'dataTable:update',
+		'dataTable:delete',
+		'dataTable:readRow',
+		'dataTable:writeRow',
+	] as const,
+};
+
+/**
+ * Human-readable labels for scopes
+ */
+export const DATABRICKS_SCOPE_LABELS: Record<string, string> = {
+	// Workflow scopes
+	'workflow:read': 'Read',
+	'workflow:update': 'Update',
+	'workflow:delete': 'Delete',
+	'workflow:execute': 'Execute',
+	'workflow:share': 'Share',
+	'workflow:move': 'Move',
+	'workflow:activate': 'Activate',
+	'workflow:deactivate': 'Deactivate',
+	'workflow:publish': 'Publish',
+	// Credential scopes
+	'credential:read': 'Read',
+	'credential:update': 'Update',
+	'credential:delete': 'Delete',
+	'credential:share': 'Share',
+	'credential:move': 'Move',
+	// Data table scopes
+	'dataTable:read': 'Read',
+	'dataTable:update': 'Update',
+	'dataTable:delete': 'Delete',
+	'dataTable:readRow': 'Read Rows',
+	'dataTable:writeRow': 'Write Rows',
+};
+
+/**
+ * Human-readable labels for securable types
+ */
+export const DATABRICKS_SECURABLE_LABELS: Record<DatabricksSecurableType, string> = {
+	workflow: 'Workflow',
+	credential: 'Credential',
+	data_table: 'Data Table',
+};
+
+export interface DatabricksPrincipal {
+	type: 'user' | 'group' | 'servicePrincipal';
+	id: string; // Databricks user ID, group ID, or service principal ID
+}
+
+export interface DatabricksPermissionGroup {
+	principal: DatabricksPrincipal;
+	scopes: string[]; // n8n scope names (e.g., 'workflow:read', 'workflow:execute')
+}
+
+export interface DatabricksSecurablePermissions {
+	permission_groups: DatabricksPermissionGroup[];
+}
+
+/** @deprecated Use DatabricksSecurablePermissions instead */
+export type DatabricksWorkflowPermissions = DatabricksSecurablePermissions;
+
+/** @deprecated Use scopes (string) instead */
+export type DatabricksPermission = 'READ' | 'USE' | 'WRITE' | 'MANAGE';
+
+/** @deprecated Use DATABRICKS_SECURABLE_SCOPES instead */
+export const DATABRICKS_SECURABLE_PERMISSIONS: Record<
+	DatabricksSecurableType,
+	DatabricksPermission[]
+> = {
+	workflow: ['READ', 'USE', 'WRITE', 'MANAGE'],
+	credential: ['READ', 'USE', 'MANAGE'],
+	data_table: ['READ', 'WRITE', 'MANAGE'],
+};
+
+/** @deprecated Use DATABRICKS_SCOPE_LABELS instead */
+export const DATABRICKS_PERMISSION_LABELS: Record<DatabricksPermission, string> = {
+	READ: 'Read',
+	USE: 'Use (Execute)',
+	WRITE: 'Write',
+	MANAGE: 'Manage',
+};
+
 export interface WorkflowFEMeta {
 	onboardingId?: string;
 	templateId?: string;
 	instanceId?: string;
 	templateCredsSetupCompleted?: boolean;
+	__databricks_permissions?: DatabricksSecurablePermissions;
 }
 
 export interface WorkflowTestData {

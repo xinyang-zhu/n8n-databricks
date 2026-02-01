@@ -11,6 +11,7 @@ import {
 	UpdateDataTableRowDto,
 	UpsertDataTableRowDto,
 } from '@n8n/api-types';
+import { GlobalConfig } from '@n8n/config';
 import { AuthenticatedRequest } from '@n8n/db';
 import {
 	Body,
@@ -25,11 +26,13 @@ import {
 	RestController,
 } from '@n8n/decorators';
 import { NextFunction, Response } from 'express';
+import type { DatabricksPermission } from 'n8n-workflow';
 import { DataTableRowReturn } from 'n8n-workflow';
 
 import { ResponseError } from '@/errors/response-errors/abstract/response.error';
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { ConflictError } from '@/errors/response-errors/conflict.error';
+import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
 import { InternalServerError } from '@/errors/response-errors/internal-server.error';
 import { NotFoundError } from '@/errors/response-errors/not-found.error';
 
@@ -39,6 +42,7 @@ import { DataTableNameConflictError } from './errors/data-table-name-conflict.er
 import { DataTableNotFoundError } from './errors/data-table-not-found.error';
 import { DataTableSystemColumnNameConflictError } from './errors/data-table-system-column-name-conflict.error';
 import { DataTableValidationError } from './errors/data-table-validation.error';
+import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 import { ProjectService } from '@/services/project.service.ee';
 
 @RestController('/projects/:projectId/data-tables')
@@ -46,7 +50,49 @@ export class DataTableController {
 	constructor(
 		private readonly dataTableService: DataTableService,
 		private readonly projectService: ProjectService,
+		private readonly globalConfig: GlobalConfig,
+		private readonly databricksPermissionService: DatabricksPermissionService,
 	) {}
+
+	/**
+	 * Get Databricks token from request (cookie or header)
+	 */
+	private getDatabricksToken(req: AuthenticatedRequest): string | undefined {
+		const cookieToken = req.cookies?.['n8n-databricks-token'];
+		if (cookieToken) return cookieToken;
+		const headerToken = req.headers['x-databricks-token'] as string | undefined;
+		return headerToken;
+	}
+
+	/**
+	 * Check Databricks permission for a data table.
+	 * This should be called AFTER n8n's native access control passes.
+	 * Data tables have: READ, WRITE, MANAGE (no USE).
+	 */
+	private async checkDatabricksPermission(
+		req: AuthenticatedRequest,
+		dataTableId: string,
+		requiredPermission: DatabricksPermission,
+	): Promise<void> {
+		if (!this.globalConfig.databricks.rbacEnabled) {
+			return;
+		}
+
+		const databricksToken = this.getDatabricksToken(req);
+		const hasPermission = await this.databricksPermissionService.hasPermission(
+			'data_table',
+			dataTableId,
+			req.user,
+			requiredPermission,
+			databricksToken,
+		);
+
+		if (!hasPermission) {
+			throw new ForbiddenError(
+				`You do not have ${requiredPermission} permission on this data table`,
+			);
+		}
+	}
 
 	private handleDataTableColumnOperationError(e: unknown): never {
 		if (
@@ -126,6 +172,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Body dto: UpdateDataTableDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			return await this.dataTableService.updateDataTable(dataTableId, req.params.projectId, dto);
 		} catch (e: unknown) {
@@ -148,6 +197,9 @@ export class DataTableController {
 		_res: Response,
 		@Param('dataTableId') dataTableId: string,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'MANAGE');
+
 		try {
 			return await this.dataTableService.deleteDataTable(dataTableId, req.params.projectId);
 		} catch (e: unknown) {
@@ -168,6 +220,9 @@ export class DataTableController {
 		_res: Response,
 		@Param('dataTableId') dataTableId: string,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'READ');
+
 		try {
 			return await this.dataTableService.getColumns(dataTableId, req.params.projectId);
 		} catch (e: unknown) {
@@ -189,6 +244,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Body dto: AddDataTableColumnDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			return await this.dataTableService.addColumn(dataTableId, req.params.projectId, dto);
 		} catch (e: unknown) {
@@ -204,6 +262,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Param('columnId') columnId: string,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			return await this.dataTableService.deleteColumn(dataTableId, req.params.projectId, columnId);
 		} catch (e: unknown) {
@@ -220,6 +281,9 @@ export class DataTableController {
 		@Param('columnId') columnId: string,
 		@Body dto: MoveDataTableColumnDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			return await this.dataTableService.moveColumn(
 				dataTableId,
@@ -241,6 +305,9 @@ export class DataTableController {
 		@Param('columnId') columnId: string,
 		@Body dto: RenameDataTableColumnDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			return await this.dataTableService.renameColumn(
 				dataTableId,
@@ -261,6 +328,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Query dto: ListDataTableContentQueryDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'READ');
+
 		try {
 			return await this.dataTableService.getManyRowsAndCount(
 				dataTableId,
@@ -284,9 +354,12 @@ export class DataTableController {
 		req: AuthenticatedRequest<{ projectId: string; dataTableId: string }>,
 		_res: Response,
 	) {
-		try {
-			const { projectId, dataTableId } = req.params;
+		const { projectId, dataTableId } = req.params;
 
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'READ');
+
+		try {
 			// Generate CSV content - this will validate that the table exists
 			const { csvContent, dataTableName } = await this.dataTableService.generateDataTableCsv(
 				dataTableId,
@@ -325,6 +398,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Body dto: AddDataTableRowsDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			return await this.dataTableService.insertRows(
 				dataTableId,
@@ -353,6 +429,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Body dto: UpsertDataTableRowDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			// because of strict overloads, we need separate paths
 			const dryRun = dto.dryRun;
@@ -405,6 +484,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Body dto: UpdateDataTableRowDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			// because of strict overloads, we need separate paths
 			const dryRun = dto.dryRun;
@@ -457,6 +539,9 @@ export class DataTableController {
 		@Param('dataTableId') dataTableId: string,
 		@Query dto: DeleteDataTableRowsDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, dataTableId, 'WRITE');
+
 		try {
 			return await this.dataTableService.deleteRows(
 				dataTableId,

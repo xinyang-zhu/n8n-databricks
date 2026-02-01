@@ -19,6 +19,47 @@ frontend, and extensible node-based workflow engine.
   suggested by linear
 - Use mermaid diagrams in MD files when you need to visualise something
 
+## CRITICAL: Avoiding Stale State
+
+**NEVER debug in circles. Check for stale state FIRST.**
+
+### Stale Builds
+
+When code looks correct but doesn't work (imports undefined, console.logs don't
+appear, changes not reflected):
+
+1. **Check build warnings** - `IMPORT_IS_UNDEFINED` means the dependency package
+   needs rebuilding
+2. **Rebuild dependent packages in order:**
+   ```bash
+   # If you modified @n8n/rest-api-client, @n8n/api-types, n8n-workflow, etc.
+   pnpm --filter=@n8n/rest-api-client build  # Build the dependency FIRST
+   pnpm --filter=n8n-editor-ui build          # Then build the consumer
+   ```
+3. **Package dependency order:**
+   - `n8n-workflow` → `@n8n/api-types` → `@n8n/rest-api-client` → `n8n-editor-ui`
+   - Always rebuild downstream packages after modifying upstream ones
+
+### Stale Environment Variables
+
+When services fail with "not enabled" or config-related errors:
+
+1. **Always source shell config before starting services:**
+   ```bash
+   source ~/.zshrc && ./dev.sh restart
+   ```
+2. **Verify env vars are actually loaded:**
+   ```bash
+   env | grep -E "N8N_|DATABRICKS_"
+   ```
+3. **Don't assume** - variables in `.zshrc` are NOT automatically in Claude's
+   shell session
+
+### Stale Frontend Cache
+
+The server caches frontend in `~/.cache/n8n/public/`. Always use `./dev.sh restart`
+which clears this cache automatically.
+
 ## Essential Commands
 
 ### Building
@@ -33,6 +74,107 @@ You can inspect the last few lines of the build log file to check for errors:
 ```bash
 tail -n 20 build.log
 ```
+
+### Development Server
+Use the `dev.sh` script for fast development:
+
+```bash
+./dev.sh restart   # Stop, build CLI, start (default)
+./dev.sh build     # Build CLI package only
+./dev.sh start     # Start without building
+./dev.sh stop      # Stop n8n
+```
+
+Or run the n8n binary directly (skips rebuild):
+```bash
+./packages/cli/bin/n8n
+```
+
+The backend serves both the API and the editor UI on a single port:
+- **Editor UI + API**: http://localhost:5678
+
+**Note:** Avoid using `pnpm dev` as it tries to start 40+ packages in parallel
+with turbo, which is slow and often times out.
+
+### Build Workflow for Different Change Types
+
+**CRITICAL: Understand what needs rebuilding based on what you changed.**
+
+#### Backend Changes (packages/cli, packages/@n8n/db, packages/@n8n/config, etc.)
+```bash
+./dev.sh restart   # Rebuilds CLI and restarts server
+```
+
+#### Frontend Changes (packages/frontend/editor-ui)
+
+**CRITICAL: Understand the frontend serving pipeline:**
+```
+Source (.vue files)
+    ↓ pnpm build
+packages/frontend/editor-ui/dist/
+    ↓ Server copies on START
+~/.cache/n8n/public/           ← Server serves from HERE (NEVER auto-cleared!)
+    ↓
+Browser
+```
+
+**The server caches frontend assets in `~/.cache/n8n/public/` on startup.**
+**dev.sh automatically clears this cache on every start/restart.**
+
+**Standard frontend change workflow:**
+```bash
+# Step 1: Build frontend
+cd packages/frontend/editor-ui && pnpm build
+
+# Step 2: Restart server (clears cache + copies new dist)
+./dev.sh restart
+
+# Step 3: Refresh browser (Cmd+Shift+R to bypass browser cache)
+```
+
+#### Verifying Your Build Applied
+Always verify your changes were actually built AND cached:
+```bash
+# 1. Check source file modification time
+stat -f "%Sm" packages/frontend/editor-ui/src/app/components/YourFile.vue
+
+# 2. Check dist folder exists and is newer than source
+stat -f "%Sm" packages/frontend/editor-ui/dist/index.html
+
+# 3. Check cache is newer than dist (populated on server start)
+stat -f "%Sm" ~/.cache/n8n/public/index.html
+
+# Timeline should be: Source < Dist < Cache
+```
+
+If dist is missing or older than source → run `pnpm build` in editor-ui
+If cache is older than dist → restart server with `./dev.sh restart`
+
+#### Debugging Frontend Not Updating
+```bash
+# Find the CSS file for your component in the cache
+grep -l "YourClassName" ~/.cache/n8n/public/assets/*.css
+
+# Check what CSS is actually being served
+grep "your-css-property" ~/.cache/n8n/public/assets/YourFile.css
+```
+
+#### Full Rebuild (when dependencies change or things are broken)
+```bash
+pnpm build > build.log 2>&1
+tail -n 20 build.log  # Check for errors
+```
+
+#### Summary Table
+| Changed Files | Command | Server Restart? | Browser Refresh? |
+|--------------|---------|-----------------|------------------|
+| Backend (CLI, services, controllers) | `./dev.sh restart` | Yes (automatic) | Yes |
+| Frontend (Vue components, CSS) | `cd packages/frontend/editor-ui && pnpm build` then `./dev.sh restart` | **YES** (to update cache) | Yes (disable cache) |
+| Shared types (@n8n/api-types) | `pnpm build` then `./dev.sh restart` | Yes | Yes |
+| Database entities/migrations | `./dev.sh restart` | Yes | Yes |
+
+**WARNING:** Frontend changes require server restart because the server caches
+frontend assets in `~/.cache/n8n/public/` on startup.
 
 ### Testing
 - `pnpm test` - Run all tests
@@ -165,6 +307,116 @@ When implementing features:
 4. Update frontend in `packages/editor-ui` with i18n support
 5. Write tests with proper mocks
 6. Run `pnpm typecheck` to verify types
+
+## Databricks RBAC Integration
+
+This fork adds Databricks-based Role-Based Access Control (RBAC) that works
+independently of n8n's native permissions.
+
+### Architecture
+
+- **Permission Storage**: `databricks_securable_permission` table stores
+  permissions for workflows, credentials, and data tables
+- **Identity Resolution**: Uses Databricks SCIM API (`/api/2.0/preview/scim/v2/Me`)
+  to get user ID and group memberships from Databricks token
+- **Permission Hierarchy**: READ < USE < WRITE < MANAGE (higher includes lower)
+
+### Key Files
+
+- `packages/cli/src/services/databricks-permission.service.ts` - Core permission
+  checking and management
+- `packages/cli/src/controllers/databricks-permissions.controller.ts` - REST API
+  for managing permissions
+- `packages/@n8n/db/src/entities/databricks-securable-permission.ts` - Database
+  entity
+- `packages/frontend/editor-ui/src/app/components/DatabricksPermissionsModal.vue`
+  - UI for managing permissions
+
+### Current Status
+
+| Resource    | Individual Access | Listing in Overview | Notes |
+|-------------|-------------------|---------------------|-------|
+| Workflows   | ✅ Working        | ✅ Working          | Users see workflows they have Databricks access to |
+| Credentials | ✅ Working        | ✅ Working          | Users see credentials they have Databricks access to |
+| Data Tables | ✅ Working        | ❌ Not implemented  | See limitation below |
+
+### Data Tables Limitation
+
+**Data tables do NOT appear in a global listing** like workflows and credentials.
+
+**Reason**: Data tables are architecturally project-scoped:
+- Endpoint: `/rest/projects/:projectId/data-tables` (requires project ID)
+- No global `/rest/data-tables` endpoint exists
+- Users can only view data tables within projects they have n8n access to
+
+**Current behavior**:
+- Databricks RBAC checks work for individual data table operations (read, write,
+  delete columns/rows, etc.)
+- But users won't see data tables from other projects in the UI unless they have
+  n8n project access
+
+**To fix**: Would require either:
+1. A new global `/rest/data-tables` endpoint that lists all Databricks-accessible
+   data tables across projects
+2. Frontend changes to aggregate data tables from multiple projects
+
+### Permission Logic: MAX(DBX, N8N)
+
+**CRITICAL**: The two permission systems are independent and use OR logic:
+- `Permission = MAX(DBX, N8N)` - user has access if EITHER system grants it
+- Never "check one first, fallback to other" - always check BOTH
+- If Databricks grants USE and n8n grants nothing → allowed
+- If n8n grants workflow:execute and Databricks grants nothing → allowed
+
+**Correct pattern** (without @ProjectScope decorator):
+```typescript
+@Get('/:workflowId')
+async getWorkflow(req: WorkflowRequest.Get) {
+    const { workflowId } = req.params;
+
+    // Check BOTH permission systems
+    const hasDatabricksAccess = this.globalConfig.databricks.rbacEnabled &&
+        (await this.hasDatabricksPermission(req, workflowId, 'READ'));
+    const hasN8nAccess = await userHasScopes(req.user, ['workflow:read'], false, { workflowId });
+
+    // Allow if EITHER grants access
+    if (!hasDatabricksAccess && !hasN8nAccess) {
+        throw new ForbiddenError('...');
+    }
+    // ... rest of method
+}
+```
+
+**Incorrect pattern** (DO NOT USE):
+```typescript
+@ProjectScope('workflow:read')  // ❌ Runs BEFORE method body, blocks Databricks check
+async getWorkflow(req: WorkflowRequest.Get) {
+    await this.checkDatabricksPermission(req, workflowId, 'READ');  // ❌ Never reached if n8n denies
+}
+```
+
+### Endpoints Status
+
+| Endpoint | Correct MAX(DBX,N8N)? | Notes |
+|----------|----------------------|-------|
+| GET /:workflowId | ✅ Fixed | |
+| POST /:workflowId/run | ✅ Fixed | |
+| PATCH /:workflowId | ❌ Uses @ProjectScope | Needs fix |
+| DELETE /:workflowId | ❌ Uses @ProjectScope | Needs fix |
+| POST /:workflowId/activate | ❌ Uses @ProjectScope | Needs fix |
+| POST /:workflowId/deactivate | ❌ Uses @ProjectScope | Needs fix |
+| POST /:workflowId/archive | ❌ Uses @ProjectScope | Needs fix |
+| POST /:workflowId/unarchive | ❌ Uses @ProjectScope | Needs fix |
+| PUT /:workflowId/share | ❌ Uses @ProjectScope | Needs fix |
+| PUT /:workflowId/transfer | ❌ Uses @ProjectScope | Needs fix |
+
+### Important Notes
+
+- **Group permissions must use Databricks group IDs** (e.g., `8867436103593334`),
+  not display names (e.g., `users`). The SCIM API returns group IDs, not names.
+- **Service principals** authenticate with synthetic email
+  `sp-{applicationId}@databricks.local`
+- **PostgreSQL is used** (`DB_TYPE=postgresdb`), not SQLite
 
 ## Github Guidelines
 - When creating a PR, use the conventions in

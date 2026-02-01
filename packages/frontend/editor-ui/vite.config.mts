@@ -219,6 +219,26 @@ export default mergeConfig(
 		resolve: { alias },
 		base: publicPath,
 		envPrefix: ['VUE', 'N8N_ENV_FEAT'],
+		server: {
+			proxy: {
+				'/rest': {
+					target: 'http://localhost:5678',
+					changeOrigin: true,
+				},
+				'/api': {
+					target: 'http://localhost:5678',
+					changeOrigin: true,
+				},
+				'/types': {
+					target: 'http://localhost:5678',
+					changeOrigin: true,
+				},
+				'/static': {
+					target: 'http://localhost:5678',
+					changeOrigin: true,
+				},
+			},
+		},
 		css: {
 			preprocessorOptions: {
 				scss: {

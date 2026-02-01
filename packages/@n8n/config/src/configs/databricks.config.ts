@@ -13,6 +13,10 @@ export class DatabricksConfig {
 	/** Enable Databricks token login (user provides their PAT) */
 	@Env('N8N_AUTH_DATABRICKS_TOKEN_ENABLED')
 	tokenLoginEnabled: boolean = false;
+
+	/** Enable Databricks RBAC for workflows, credentials, and data tables */
+	@Env('N8N_DATABRICKS_RBAC_ENABLED')
+	rbacEnabled: boolean = true;
 }
 
 @Config

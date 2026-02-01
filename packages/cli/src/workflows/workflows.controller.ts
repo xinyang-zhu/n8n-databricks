@@ -62,6 +62,7 @@ import { License } from '@/license';
 import { listQueryMiddleware } from '@/middlewares';
 import { userHasScopes } from '@/permissions.ee/check-access';
 import * as ResponseHelper from '@/response-helper';
+import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 import { FolderService } from '@/services/folder.service';
 import { NamingService } from '@/services/naming.service';
 import { ProjectService } from '@/services/project.service.ee';
@@ -96,7 +97,63 @@ export class WorkflowsController {
 		private readonly workflowFinderService: WorkflowFinderService,
 		private readonly executionService: ExecutionService,
 		private readonly collaborationService: CollaborationService,
+		private readonly databricksPermissionService: DatabricksPermissionService,
 	) {}
+
+	/**
+	 * Get Databricks token from request (cookie or header)
+	 */
+	private getDatabricksToken(req: AuthenticatedRequest): string | undefined {
+		const cookieToken = req.cookies?.['n8n-databricks-token'];
+		if (cookieToken) return cookieToken;
+		const headerToken = req.headers['x-databricks-token'] as string | undefined;
+		return headerToken;
+	}
+
+	/**
+	 * Check if user has a Databricks scope on a workflow.
+	 * Uses n8n scope names directly (e.g., 'workflow:read', 'workflow:execute').
+	 */
+	private async hasDatabricksScope(
+		req: AuthenticatedRequest,
+		workflowId: string,
+		requiredScope: string,
+	): Promise<boolean> {
+		if (!this.globalConfig.databricks.rbacEnabled) {
+			return false; // RBAC disabled, no Databricks scopes
+		}
+
+		const databricksToken = this.getDatabricksToken(req);
+		if (!databricksToken) {
+			return false;
+		}
+
+		return await this.databricksPermissionService.hasScope(
+			'workflow',
+			workflowId,
+			requiredScope,
+			databricksToken,
+		);
+	}
+
+	/**
+	 * @deprecated Use hasDatabricksScope with MAX(DBX, N8N) pattern instead.
+	 * This is kept for backward compatibility with endpoints using @ProjectScope.
+	 */
+	private async checkDatabricksPermission(
+		req: AuthenticatedRequest,
+		workflowId: string,
+		requiredScope: string,
+	): Promise<void> {
+		if (!this.globalConfig.databricks.rbacEnabled) {
+			return; // RBAC disabled, skip check
+		}
+
+		const hasScope = await this.hasDatabricksScope(req, workflowId, requiredScope);
+		if (!hasScope) {
+			throw new ForbiddenError(`You do not have ${requiredScope} permission on this workflow`);
+		}
+	}
 
 	@Post('/')
 	async create(req: AuthenticatedRequest, _res: unknown, @Body body: CreateWorkflowDto) {
@@ -231,6 +288,31 @@ export class WorkflowsController {
 			throw new InternalServerError('Failed to save workflow');
 		}
 
+		// Initialize Databricks permissions - grant MANAGE to creator
+		if (this.globalConfig.databricks.rbacEnabled) {
+			const databricksToken = this.getDatabricksToken(req);
+			if (databricksToken) {
+				try {
+					const creatorDatabricksId =
+						await this.databricksPermissionService.getCurrentUserDatabricksId(databricksToken);
+					// Grant all workflow scopes to the creator
+					const allWorkflowScopes = this.databricksPermissionService.getAvailableScopes('workflow');
+					await this.databricksPermissionService.grantScopes(
+						'workflow',
+						savedWorkflow.id,
+						'user',
+						creatorDatabricksId,
+						[...allWorkflowScopes],
+					);
+				} catch (error) {
+					this.logger.warn('Failed to initialize Databricks permissions for workflow', {
+						workflowId: savedWorkflow.id,
+						error: (error as Error).message,
+					});
+				}
+			}
+		}
+
 		if (tagIds && !this.globalConfig.tags.disabled && savedWorkflow.tags) {
 			savedWorkflow.tags = this.tagService.sortByRequestOrder(savedWorkflow.tags, {
 				requestOrder: tagIds,
@@ -270,7 +352,7 @@ export class WorkflowsController {
 					})
 				: true;
 
-			const { workflows: data, count } = await this.workflowService.getMany(
+			const { workflows: data } = await this.workflowService.getMany(
 				req.user,
 				req.listQueryOptions,
 				!!req.query.includeScopes,
@@ -278,7 +360,50 @@ export class WorkflowsController {
 				!!req.query.onlySharedWithMe,
 			);
 
-			res.json({ count, data });
+			// If Databricks RBAC is enabled, also include workflows the user has Databricks access to
+			if (this.globalConfig.databricks.rbacEnabled) {
+				const databricksToken = this.getDatabricksToken(req);
+				if (databricksToken) {
+					const databricksAccessibleIds =
+						await this.databricksPermissionService.getAccessibleSecurableIds(
+							'workflow',
+							databricksToken,
+							'workflow:read',
+						);
+
+					// Filter to IDs not already in the result
+					const existingIds = new Set(data.map((w) => w.id));
+					const newIds = databricksAccessibleIds.filter((id) => !existingIds.has(id));
+
+					if (newIds.length > 0) {
+						// Fetch the additional workflows
+						const additionalWorkflows = await this.workflowRepository.find({
+							where: { id: In(newIds) },
+							relations: {
+								shared: {
+									project: true,
+								},
+								tags: !this.globalConfig.tags.disabled,
+							},
+						});
+
+						// Add owner/sharing info if sharing is enabled
+						if (this.license.isSharingEnabled()) {
+							for (const workflow of additionalWorkflows) {
+								const workflowWithMeta =
+									this.enterpriseWorkflowService.addOwnerAndSharings(workflow);
+								// @ts-expect-error: Clean up shared field
+								delete workflowWithMeta.shared;
+								data.push(workflowWithMeta);
+							}
+						} else {
+							data.push(...additionalWorkflows);
+						}
+					}
+				}
+			}
+
+			res.json({ count: data.length, data });
 		} catch (maybeError) {
 			const error = utils.toError(maybeError);
 			ResponseHelper.reportError(error);
@@ -341,57 +466,16 @@ export class WorkflowsController {
 	}
 
 	@Get('/:workflowId')
-	@ProjectScope('workflow:read')
 	async getWorkflow(req: WorkflowRequest.Get) {
 		const { workflowId } = req.params;
 
-		if (this.license.isSharingEnabled()) {
-			const relations: FindOptionsRelations<WorkflowEntity> = {
-				shared: {
-					project: {
-						projectRelations: true,
-					},
-				},
-			};
+		// Permission = MAX(DBX, N8N) - allow if EITHER system grants access
+		const hasDatabricksAccess =
+			this.globalConfig.databricks.rbacEnabled &&
+			(await this.hasDatabricksScope(req, workflowId, 'workflow:read'));
 
-			if (!this.globalConfig.tags.disabled) {
-				relations.tags = true;
-			}
-
-			const workflow = await this.workflowFinderService.findWorkflowForUser(
-				workflowId,
-				req.user,
-				['workflow:read'],
-				{
-					includeTags: !this.globalConfig.tags.disabled,
-					includeParentFolder: true,
-					includeActiveVersion: true,
-				},
-			);
-
-			if (!workflow) {
-				throw new NotFoundError(`Workflow with ID "${workflowId}" does not exist`);
-			}
-
-			const enterpriseWorkflowService = this.enterpriseWorkflowService;
-
-			const workflowWithMetaData = enterpriseWorkflowService.addOwnerAndSharings(workflow);
-
-			await enterpriseWorkflowService.addCredentialsToWorkflow(workflowWithMetaData, req.user);
-
-			// @ts-expect-error: This is added as part of addOwnerAndSharings but
-			// shouldn't be returned to the frontend
-			delete workflowWithMetaData.shared;
-
-			const scopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
-			const checksum = await calculateWorkflowChecksum(workflow);
-
-			return { ...workflowWithMetaData, scopes, checksum };
-		}
-
-		// sharing disabled
-
-		const workflow = await this.workflowFinderService.findWorkflowForUser(
+		// Try to find workflow via n8n native permissions
+		const workflowViaN8n = await this.workflowFinderService.findWorkflowForUser(
 			workflowId,
 			req.user,
 			['workflow:read'],
@@ -402,19 +486,61 @@ export class WorkflowsController {
 			},
 		);
 
-		if (!workflow) {
-			this.logger.warn('User attempted to access a workflow without permissions', {
-				workflowId,
-				userId: req.user.id,
-			});
-			throw new NotFoundError(
-				'Could not load the workflow - you can only access workflows owned by you',
-			);
+		const hasN8nAccess = !!workflowViaN8n;
+
+		// Deny if neither permission system grants access
+		if (!hasDatabricksAccess && !hasN8nAccess) {
+			throw new NotFoundError(`Workflow with ID "${workflowId}" does not exist`);
 		}
 
-		const scopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
-		const checksum = await calculateWorkflowChecksum(workflow);
+		// Fetch workflow - use n8n result if available, otherwise fetch directly
+		let workflow: WorkflowEntity;
+		if (workflowViaN8n) {
+			workflow = workflowViaN8n;
+		} else {
+			// User has Databricks access but not n8n access - fetch directly
+			const relations: FindOptionsRelations<WorkflowEntity> = {
+				shared: {
+					project: {
+						projectRelations: true,
+					},
+				},
+			};
+			if (!this.globalConfig.tags.disabled) {
+				relations.tags = true;
+			}
+			const found = await this.workflowRepository.findOne({
+				where: { id: workflowId },
+				relations,
+			});
+			if (!found) {
+				throw new NotFoundError(`Workflow with ID "${workflowId}" does not exist`);
+			}
+			workflow = found;
+		}
 
+		// Compute scopes - use n8n scopes if available, otherwise derive from Databricks permission
+		let scopes: readonly string[];
+		if (hasN8nAccess) {
+			scopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
+		} else {
+			// Only Databricks access - grant read scope
+			scopes = ['workflow:read'] as const;
+		}
+
+		if (this.license.isSharingEnabled()) {
+			const workflowWithMetaData = this.enterpriseWorkflowService.addOwnerAndSharings(workflow);
+			await this.enterpriseWorkflowService.addCredentialsToWorkflow(workflowWithMetaData, req.user);
+
+			// @ts-expect-error: This is added as part of addOwnerAndSharings but
+			// shouldn't be returned to the frontend
+			delete workflowWithMetaData.shared;
+
+			const checksum = await calculateWorkflowChecksum(workflow);
+			return { ...workflowWithMetaData, scopes, checksum };
+		}
+
+		const checksum = await calculateWorkflowChecksum(workflow);
 		return { ...workflow, scopes, checksum };
 	}
 
@@ -439,6 +565,9 @@ export class WorkflowsController {
 		@Body body: UpdateWorkflowDto,
 	) {
 		const forceSave = req.query.forceSave === 'true';
+
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:update');
 
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'update');
 
@@ -498,6 +627,9 @@ export class WorkflowsController {
 	@Delete('/:workflowId')
 	@ProjectScope('workflow:delete')
 	async delete(req: AuthenticatedRequest, _res: Response, @Param('workflowId') workflowId: string) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:delete');
+
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'delete');
 
 		const workflow = await this.workflowService.delete(req.user, workflowId);
@@ -521,6 +653,9 @@ export class WorkflowsController {
 		_res: Response,
 		@Param('workflowId') workflowId: string,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:delete');
+
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'archive');
 
 		const workflow = await this.workflowService.archive(req.user, workflowId);
@@ -548,6 +683,9 @@ export class WorkflowsController {
 		_res: Response,
 		@Param('workflowId') workflowId: string,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:delete');
+
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'unarchive');
 
 		const workflow = await this.workflowService.unarchive(req.user, workflowId);
@@ -576,6 +714,9 @@ export class WorkflowsController {
 		@Param('workflowId') workflowId: string,
 		@Body body: ActivateWorkflowDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:activate');
+
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'activate');
 
 		const { versionId, name, description, expectedChecksum } = body;
@@ -600,6 +741,9 @@ export class WorkflowsController {
 	async deactivate(req: WorkflowRequest.Deactivate) {
 		const { workflowId } = req.params;
 
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:deactivate');
+
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'deactivate');
 
 		const workflow = await this.workflowService.deactivateWorkflow(req.user, workflowId);
@@ -613,7 +757,6 @@ export class WorkflowsController {
 	}
 
 	@Post('/:workflowId/run')
-	@ProjectScope('workflow:execute')
 	async runManually(req: WorkflowRequest.ManualRun, _res: unknown) {
 		if (!req.body.workflowData.id) {
 			throw new UnexpectedError('You cannot execute a workflow without an ID');
@@ -621,6 +764,21 @@ export class WorkflowsController {
 
 		if (req.params.workflowId !== req.body.workflowData.id) {
 			throw new UnexpectedError('Workflow ID in body does not match workflow ID in URL');
+		}
+
+		const workflowId = req.params.workflowId;
+
+		// Permission = MAX(DBX, N8N) - allow if EITHER system grants access
+		const hasDatabricksAccess =
+			this.globalConfig.databricks.rbacEnabled &&
+			(await this.hasDatabricksScope(req, workflowId, 'workflow:execute'));
+
+		const hasN8nAccess = await userHasScopes(req.user, ['workflow:execute'], false, {
+			workflowId,
+		});
+
+		if (!hasDatabricksAccess && !hasN8nAccess) {
+			throw new ForbiddenError('You do not have permission to execute this workflow');
 		}
 
 		if (this.license.isSharingEnabled()) {
@@ -665,6 +823,9 @@ export class WorkflowsController {
 	async share(req: WorkflowRequest.Share) {
 		const { workflowId } = req.params;
 		const { shareWithIds } = req.body;
+
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:share');
 
 		if (
 			!Array.isArray(shareWithIds) ||
@@ -735,6 +896,9 @@ export class WorkflowsController {
 		@Param('workflowId') workflowId: string,
 		@Body body: TransferWorkflowBodyDto,
 	) {
+		// Check Databricks RBAC permission (after n8n access control)
+		await this.checkDatabricksPermission(req, workflowId, 'workflow:move');
+
 		return await this.enterpriseWorkflowService.transferWorkflow(
 			req.user,
 			workflowId,

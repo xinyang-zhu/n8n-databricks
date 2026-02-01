@@ -4,6 +4,12 @@ Extra information, specific to the frontend codebase.
 
 ### CSS Variables Reference
 
+**CRITICAL: All CSS variables use DOUBLE DASHES as separators.**
+- CORRECT: `var(--spacing--xl)`, `var(--color--text)`, `var(--font-size--sm)`
+- WRONG: `var(--spacing-xl)`, `var(--color-text)`, `var(--font-size-sm)`
+
+If your styles aren't applying, check your variable names for single vs double dashes!
+
 Use the following CSS variables to maintain consistency across the
 application. These variables cover colors, spacing, typography, and borders.
 

@@ -15,6 +15,7 @@ import {
 	WORKFLOW_SHARE_MODAL_KEY,
 	EnterpriseEditionFeature,
 	WORKFLOW_DESCRIPTION_MODAL_KEY,
+	DATABRICKS_PERMISSIONS_MODAL_KEY,
 } from '@/app/constants';
 import { hasPermission } from '@/app/utils/rbac/permissions';
 import { useRoute } from 'vue-router';
@@ -212,6 +213,14 @@ const workflowMenuItems = computed<Array<ActionDropdownItem<WORKFLOW_MENU_ACTION
 			id: WORKFLOW_MENU_ACTIONS.UNPUBLISH,
 			label: locale.baseText('menuActions.unpublish'),
 			disabled: !onWorkflowPage.value,
+		});
+	}
+
+	if (settingsStore.isDatabricksRbacEnabled && !props.isArchived) {
+		actions.push({
+			id: WORKFLOW_MENU_ACTIONS.MANAGE_PERMISSIONS,
+			label: locale.baseText('workflows.item.managePermissions'),
+			disabled: !onWorkflowPage.value || props.isNewWorkflow,
 		});
 	}
 
@@ -425,6 +434,19 @@ async function onWorkflowMenuSelect(action: WORKFLOW_MENU_ACTIONS): Promise<void
 		}
 		case WORKFLOW_MENU_ACTIONS.UNPUBLISH: {
 			onUnpublishWorkflow();
+			break;
+		}
+		case WORKFLOW_MENU_ACTIONS.MANAGE_PERMISSIONS: {
+			const workflowId = getWorkflowId(props.id, route.params.name);
+			if (!workflowId) return;
+			uiStore.openModalWithData({
+				name: DATABRICKS_PERMISSIONS_MODAL_KEY,
+				data: {
+					securableType: 'workflow',
+					securableId: workflowId,
+					securableName: props.name,
+				},
+			});
 			break;
 		}
 		default:
