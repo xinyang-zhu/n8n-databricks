@@ -185,13 +185,16 @@ export class DatabricksPermissionService {
 			userId: req.user?.id,
 		});
 
-		if (token && req.user?.id) {
-			// Update cache with fresh token
-			this.setUserToken(req.user.id, token);
+		// Return header token directly if found (important for login endpoints where req.user is not set yet)
+		if (token) {
+			// Cache the token if user is already known
+			if (req.user?.id) {
+				this.setUserToken(req.user.id, token);
+			}
 			return token;
 		}
 
-		// Get from server-side cache
+		// Fall back to server-side cache if user is known
 		if (req.user?.id) {
 			const cachedToken = this.getUserToken(req.user.id);
 			this.logger.debug('[DBX-TOKEN] Retrieved from cache', {
