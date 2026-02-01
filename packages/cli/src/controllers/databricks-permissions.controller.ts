@@ -666,18 +666,14 @@ export class DatabricksPermissionsController {
 		}
 
 		try {
-			const response = await axios.get(this.permissionService.getScimUrl('Me'), {
-				headers: {
-					Authorization: `Bearer ${databricksToken}`,
-				},
-			});
+			const userData = await this.permissionService.fetchCurrentUser(databricksToken);
 
 			return {
-				id: response.data.id,
-				userName: response.data.userName,
-				displayName: response.data.displayName,
+				id: userData.id,
+				userName: userData.userName,
+				displayName: userData.displayName,
 				groups:
-					response.data.groups?.map((g: { display: string; value: string }) => ({
+					userData.groups?.map((g) => ({
 						id: g.value,
 						displayName: g.display,
 					})) ?? [],

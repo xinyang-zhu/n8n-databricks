@@ -162,7 +162,8 @@ export class DatabricksPermissionService {
 	 * Checks multiple sources in order:
 	 * 1. x-databricks-token header (explicit token from frontend)
 	 * 2. x-forwarded-access-token header (from reverse proxy with OAuth2)
-	 * 3. Server-side cache (stored during login)
+	 * 3. x-forwarded-token header (alternative reverse proxy header)
+	 * 4. Server-side cache (stored during login)
 	 *
 	 * If a token is found in headers, it's automatically cached for the user.
 	 */
@@ -172,7 +173,9 @@ export class DatabricksPermissionService {
 		// Check for explicit token header
 		const headerToken = req.headers['x-databricks-token'] as string | undefined;
 		// Check for reverse proxy OAuth2 token (forwarded by oauth2-proxy, etc.)
-		const forwardedToken = req.headers['x-forwarded-access-token'] as string | undefined;
+		const forwardedToken =
+			(req.headers['x-forwarded-access-token'] as string | undefined) ||
+			(req.headers['x-forwarded-token'] as string | undefined);
 
 		const token = headerToken || forwardedToken;
 
@@ -336,6 +339,19 @@ export class DatabricksPermissionService {
 	}
 
 	/**
+	 * Fetch current user info from Databricks SCIM /Me endpoint.
+	 * Single source of truth for all /Me calls - DO NOT duplicate this logic elsewhere.
+	 */
+	async fetchCurrentUser(databricksToken: string): Promise<DatabricksCurrentUserResponse> {
+		const response = await axios.get<DatabricksCurrentUserResponse>(this.getScimUrl('Me'), {
+			headers: {
+				Authorization: `Bearer ${databricksToken}`,
+			},
+		});
+		return response.data;
+	}
+
+	/**
 	 * Get current user's Databricks SCIM ID from their token.
 	 */
 	async getCurrentUserDatabricksId(databricksToken: string): Promise<string> {
@@ -355,15 +371,11 @@ export class DatabricksPermissionService {
 		}
 
 		try {
-			const response = await axios.get<DatabricksCurrentUserResponse>(this.getScimUrl('Me'), {
-				headers: {
-					Authorization: `Bearer ${databricksToken}`,
-				},
-			});
+			const userData = await this.fetchCurrentUser(databricksToken);
 
 			const identity: DatabricksIdentity = {
-				userId: response.data.id,
-				groupIds: response.data.groups?.map((g) => g.value) ?? [],
+				userId: userData.id,
+				groupIds: userData.groups?.map((g) => g.value) ?? [],
 			};
 
 			// Cache the result
@@ -598,7 +610,7 @@ interface DatabricksIdentity {
 	groupIds: string[];
 }
 
-interface DatabricksCurrentUserResponse {
+export interface DatabricksCurrentUserResponse {
 	id: string;
 	userName: string;
 	displayName?: string;

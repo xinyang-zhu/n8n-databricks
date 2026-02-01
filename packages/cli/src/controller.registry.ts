@@ -240,18 +240,7 @@ export class ControllerRegistry {
 				// Check Databricks permissions if RBAC is enabled
 				let hasDatabricksAccess = false;
 				if (this.globalConfig.databricks.rbacEnabled) {
-					// Check for token from explicit header or reverse proxy
-					const headerToken = req.headers['x-databricks-token'] as string | undefined;
-					const forwardedToken = req.headers['x-forwarded-access-token'] as string | undefined;
-					const token = headerToken || forwardedToken;
-
-					if (token) {
-						this.databricksPermissionService.setUserToken(req.user.id, token);
-					}
-
-					// Get token from header or server-side cache
-					const databricksToken =
-						token || this.databricksPermissionService.getUserToken(req.user.id);
+					const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 
 					if (databricksToken) {
 						// Determine securable type and ID from the scope and params

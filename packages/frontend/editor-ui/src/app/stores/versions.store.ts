@@ -230,8 +230,10 @@ export const useVersionsStore = defineStore(STORES.VERSIONS, () => {
 		}
 	};
 
-	const initialize = (settings: IVersionNotificationSettings) => {
-		versionNotificationSettings.value = settings;
+	const initialize = (settings: IVersionNotificationSettings | undefined) => {
+		if (settings) {
+			versionNotificationSettings.value = settings;
+		}
 	};
 
 	const checkForNewVersions = async () => {

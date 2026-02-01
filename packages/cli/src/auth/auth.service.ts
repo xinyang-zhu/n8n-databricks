@@ -14,6 +14,7 @@ import { AuthError } from '@/errors/response-errors/auth.error';
 import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
 import { License } from '@/license';
 import { MfaService } from '@/mfa/mfa.service';
+import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 import { JwtService } from '@/services/jwt.service';
 import { PasswordUtility } from '@/services/password.utility';
 import { UrlService } from '@/services/url.service';
@@ -70,6 +71,7 @@ export class AuthService {
 		private readonly invalidAuthTokenRepository: InvalidAuthTokenRepository,
 		private readonly mfaService: MfaService,
 		private readonly passwordUtility: PasswordUtility,
+		private readonly databricksPermissionService: DatabricksPermissionService,
 	) {
 		const restEndpoint = globalConfig.endpoints.rest;
 		this.skipBrowserIdCheckEndpoints = [
@@ -149,9 +151,9 @@ export class AuthService {
 				}
 			}
 
-			// If no JWT cookie auth, try Databricks token from x-forwarded-token header
+			// If no JWT cookie auth, try Databricks token from forwarded headers
 			if (!req.user) {
-				const databricksToken = req.headers['x-forwarded-token'] as string | undefined;
+				const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 				if (databricksToken) {
 					try {
 						const user = await this.authenticateWithDatabricksToken(databricksToken);
@@ -179,27 +181,7 @@ export class AuthService {
 	 * Validates the token against Databricks SCIM API and auto-provisions users if needed.
 	 */
 	private async authenticateWithDatabricksToken(token: string): Promise<User> {
-		const databricksHostRaw = this.globalConfig.databricks.host;
-		if (!databricksHostRaw) {
-			throw new AuthError('Databricks host not configured');
-		}
-		const databricksHost = databricksHostRaw.replace(/^https?:\/\//, '');
-
-		const databricksResponse = await fetch(`https://${databricksHost}/api/2.0/preview/scim/v2/Me`, {
-			headers: {
-				Authorization: `Bearer ${token}`,
-			},
-		});
-
-		if (!databricksResponse.ok) {
-			throw new AuthError('Invalid Databricks token');
-		}
-
-		const databricksUser = (await databricksResponse.json()) as {
-			emails?: Array<{ value: string; primary?: boolean }>;
-			displayName?: string;
-			userName?: string;
-		};
+		const databricksUser = await this.databricksPermissionService.fetchCurrentUser(token);
 		const primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
 
 		if (!primaryEmail) {

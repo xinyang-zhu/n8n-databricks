@@ -93,22 +93,8 @@ export class AuthController {
 			}
 
 			try {
-				const databricksResponse = await fetch(this.databricksPermissionService.getScimUrl('Me'), {
-					headers: {
-						Authorization: `Bearer ${databricksToken}`,
-					},
-				});
-
-				if (!databricksResponse.ok) {
-					throw new AuthError('Invalid Databricks token');
-				}
-
-				const databricksUser = (await databricksResponse.json()) as {
-					emails?: Array<{ value: string; primary?: boolean }>;
-					displayName?: string;
-					userName?: string;
-					id?: string;
-				};
+				const databricksUser =
+					await this.databricksPermissionService.fetchCurrentUser(databricksToken);
 				let primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
 
 				// Handle service principals which have UUIDs instead of real emails
@@ -247,29 +233,14 @@ export class AuthController {
 			throw new AuthError('Databricks federated login is not enabled');
 		}
 
-		const token = req.headers['x-forwarded-access-token'] as string | undefined;
+		const token = this.databricksPermissionService.getTokenFromRequest(req);
 
 		if (!token) {
 			throw new AuthError('Missing access token');
 		}
 
 		try {
-			const databricksResponse = await fetch(this.databricksPermissionService.getScimUrl('Me'), {
-				headers: {
-					Authorization: `Bearer ${token}`,
-				},
-			});
-
-			if (!databricksResponse.ok) {
-				throw new AuthError('Invalid Databricks token');
-			}
-
-			const databricksUser = (await databricksResponse.json()) as {
-				emails?: Array<{ value: string; primary?: boolean }>;
-				displayName?: string;
-				userName?: string;
-				id?: string;
-			};
+			const databricksUser = await this.databricksPermissionService.fetchCurrentUser(token);
 			let primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
 
 			// Handle service principals which have UUIDs instead of real emails
