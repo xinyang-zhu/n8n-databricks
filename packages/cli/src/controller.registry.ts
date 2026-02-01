@@ -26,6 +26,7 @@ import { UnauthenticatedError } from '@/errors/response-errors/unauthenticated.e
 import { License } from '@/license';
 import { userHasScopes } from '@/permissions.ee/check-access';
 import { send } from '@/response-helper';
+import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 import { CorsService } from './services/cors-service';
 import { inProduction } from '@n8n/backend-common';
 
@@ -38,6 +39,7 @@ export class ControllerRegistry {
 		private readonly metadata: ControllerRegistryMetadata,
 		private readonly lastActiveAtService: LastActiveAtService,
 		private readonly rateLimitService: RateLimitService,
+		private readonly databricksPermissionService: DatabricksPermissionService,
 	) {}
 
 	activate(app: Application) {
@@ -218,7 +220,12 @@ export class ControllerRegistry {
 
 	private createScopedMiddleware(accessScope: AccessScope): RequestHandler {
 		return async (
-			req: AuthenticatedRequest<{ credentialId?: string; workflowId?: string; projectId?: string }>,
+			req: AuthenticatedRequest<{
+				credentialId?: string;
+				workflowId?: string;
+				projectId?: string;
+				dataTableId?: string;
+			}>,
 			res,
 			next,
 		) => {
@@ -227,7 +234,46 @@ export class ControllerRegistry {
 			const { scope, globalOnly } = accessScope;
 
 			try {
-				if (!(await userHasScopes(req.user, [scope], globalOnly, req.params))) {
+				// Check n8n permissions
+				const hasN8nAccess = await userHasScopes(req.user, [scope], globalOnly, req.params);
+
+				// Check Databricks permissions if RBAC is enabled
+				let hasDatabricksAccess = false;
+				if (this.globalConfig.databricks.rbacEnabled) {
+					const databricksToken =
+						req.cookies?.['n8n-databricks-token'] ||
+						(req.headers['x-databricks-token'] as string | undefined);
+
+					if (databricksToken) {
+						// Determine securable type and ID from the scope and params
+						const [scopePrefix] = scope.split(':') as [string, string];
+						let securableType: 'workflow' | 'credential' | 'data_table' | undefined;
+						let securableId: string | undefined;
+
+						if (scopePrefix === 'workflow' && req.params.workflowId) {
+							securableType = 'workflow';
+							securableId = req.params.workflowId;
+						} else if (scopePrefix === 'credential' && req.params.credentialId) {
+							securableType = 'credential';
+							securableId = req.params.credentialId;
+						} else if (scopePrefix === 'dataTable' && req.params.dataTableId) {
+							securableType = 'data_table';
+							securableId = req.params.dataTableId;
+						}
+
+						if (securableType && securableId) {
+							hasDatabricksAccess = await this.databricksPermissionService.hasScope(
+								securableType,
+								securableId,
+								scope,
+								databricksToken,
+							);
+						}
+					}
+				}
+
+				// Permission = MERGE(DBX, N8N) - allow if EITHER grants access
+				if (!hasN8nAccess && !hasDatabricksAccess) {
 					res.status(403).json({
 						status: 'error',
 						message: RESPONSE_ERROR_MESSAGES.MISSING_SCOPE,

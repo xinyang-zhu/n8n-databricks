@@ -316,6 +316,14 @@ export class AuthController {
 
 			this.authService.issueCookie(res, user, false, req.browserId);
 
+			// Store Databricks token in a separate cookie for SCIM API calls
+			res.cookie('n8n-databricks-token', token, {
+				httpOnly: true,
+				secure: this.globalConfig.auth.cookie.secure,
+				sameSite: 'lax',
+				maxAge: 24 * 60 * 60 * 1000, // 24 hours
+			});
+
 			this.eventService.emit('user-logged-in', {
 				user,
 				authenticationMethod: 'databricks',

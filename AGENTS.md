@@ -360,10 +360,10 @@ independently of n8n's native permissions.
    data tables across projects
 2. Frontend changes to aggregate data tables from multiple projects
 
-### Permission Logic: MAX(DBX, N8N)
+### Permission Logic: MERGE(DBX, N8N)
 
 **CRITICAL**: The two permission systems are independent and use OR logic:
-- `Permission = MAX(DBX, N8N)` - user has access if EITHER system grants it
+- `Permission = MERGE(DBX, N8N)` - user has access if EITHER system grants it
 - Never "check one first, fallback to other" - always check BOTH
 - If Databricks grants USE and n8n grants nothing → allowed
 - If n8n grants workflow:execute and Databricks grants nothing → allowed
@@ -397,7 +397,7 @@ async getWorkflow(req: WorkflowRequest.Get) {
 
 ### Endpoints Status
 
-| Endpoint | Correct MAX(DBX,N8N)? | Notes |
+| Endpoint | Correct MERGE(DBX,N8N)? | Notes |
 |----------|----------------------|-------|
 | GET /:workflowId | ✅ Fixed | |
 | POST /:workflowId/run | ✅ Fixed | |

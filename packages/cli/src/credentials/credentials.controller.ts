@@ -30,7 +30,7 @@ import { hasGlobalScope, PROJECT_OWNER_ROLE_SLUG } from '@n8n/permissions';
 // eslint-disable-next-line n8n-local-rules/misplaced-n8n-typeorm-import
 import { In } from '@n8n/typeorm';
 import { deepCopy } from 'n8n-workflow';
-import type { DatabricksPermission, ICredentialDataDecryptedObject } from 'n8n-workflow';
+import type { ICredentialDataDecryptedObject } from 'n8n-workflow';
 import { z } from 'zod';
 
 import { CredentialsFinderService } from './credentials-finder.service';
@@ -74,36 +74,6 @@ export class CredentialsController {
 		if (cookieToken) return cookieToken;
 		const headerToken = req.headers['x-databricks-token'] as string | undefined;
 		return headerToken;
-	}
-
-	/**
-	 * Check Databricks permission for a credential.
-	 * This should be called AFTER n8n's native access control passes.
-	 * Credentials have: READ, USE, MANAGE (no WRITE).
-	 */
-	private async checkDatabricksPermission(
-		req: AuthenticatedRequest,
-		credentialId: string,
-		requiredPermission: DatabricksPermission,
-	): Promise<void> {
-		if (!this.globalConfig.databricks.rbacEnabled) {
-			return;
-		}
-
-		const databricksToken = this.getDatabricksToken(req);
-		const hasPermission = await this.databricksPermissionService.hasPermission(
-			'credential',
-			credentialId,
-			req.user,
-			requiredPermission,
-			databricksToken,
-		);
-
-		if (!hasPermission) {
-			throw new ForbiddenError(
-				`You do not have ${requiredPermission} permission on this credential`,
-			);
-		}
 	}
 
 	@Get('/', { middlewares: listQueryMiddleware })
@@ -188,9 +158,6 @@ export class CredentialsController {
 		@Param('credentialId') credentialId: string,
 		@Query query: CredentialsGetOneRequestQuery,
 	) {
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, credentialId, 'READ');
-
 		const { shared, ...credential } = this.licenseState.isSharingLicensed()
 			? await this.enterpriseCredentialsService.getOneForUser(
 					req.user,
@@ -287,10 +254,6 @@ export class CredentialsController {
 			params: { credentialId },
 		} = req;
 
-		// Check Databricks RBAC permission (after n8n access control)
-		// Credentials have READ, USE, MANAGE (no WRITE), so MANAGE is required for updates
-		await this.checkDatabricksPermission(req, credentialId, 'MANAGE');
-
 		const credential = await this.credentialsFinderService.findCredentialForUser(
 			credentialId,
 			user,
@@ -370,9 +333,6 @@ export class CredentialsController {
 	async deleteCredentials(req: CredentialRequest.Delete) {
 		const { credentialId } = req.params;
 
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, credentialId, 'MANAGE');
-
 		const credential = await this.credentialsFinderService.findCredentialForUser(
 			credentialId,
 			req.user,
@@ -406,9 +366,6 @@ export class CredentialsController {
 	async shareCredentials(req: CredentialRequest.Share) {
 		const { credentialId } = req.params;
 		const { shareWithIds } = req.body;
-
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, credentialId, 'MANAGE');
 
 		if (
 			!Array.isArray(shareWithIds) ||
@@ -485,9 +442,6 @@ export class CredentialsController {
 	@Put('/:credentialId/transfer')
 	@ProjectScope('credential:move')
 	async transfer(req: CredentialRequest.Transfer) {
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, req.params.credentialId, 'MANAGE');
-
 		const body = z.object({ destinationProjectId: z.string() }).parse(req.body);
 
 		return await this.enterpriseCredentialsService.transferOne(

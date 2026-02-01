@@ -136,25 +136,6 @@ export class WorkflowsController {
 		);
 	}
 
-	/**
-	 * @deprecated Use hasDatabricksScope with MAX(DBX, N8N) pattern instead.
-	 * This is kept for backward compatibility with endpoints using @ProjectScope.
-	 */
-	private async checkDatabricksPermission(
-		req: AuthenticatedRequest,
-		workflowId: string,
-		requiredScope: string,
-	): Promise<void> {
-		if (!this.globalConfig.databricks.rbacEnabled) {
-			return; // RBAC disabled, skip check
-		}
-
-		const hasScope = await this.hasDatabricksScope(req, workflowId, requiredScope);
-		if (!hasScope) {
-			throw new ForbiddenError(`You do not have ${requiredScope} permission on this workflow`);
-		}
-	}
-
 	@Post('/')
 	async create(req: AuthenticatedRequest, _res: unknown, @Body body: CreateWorkflowDto) {
 		if (body.id) {
@@ -469,7 +450,7 @@ export class WorkflowsController {
 	async getWorkflow(req: WorkflowRequest.Get) {
 		const { workflowId } = req.params;
 
-		// Permission = MAX(DBX, N8N) - allow if EITHER system grants access
+		// Permission = MERGE(DBX, N8N) - allow if EITHER system grants access
 		const hasDatabricksAccess =
 			this.globalConfig.databricks.rbacEnabled &&
 			(await this.hasDatabricksScope(req, workflowId, 'workflow:read'));
@@ -566,9 +547,6 @@ export class WorkflowsController {
 	) {
 		const forceSave = req.query.forceSave === 'true';
 
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:update');
-
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'update');
 
 		let updateData = new WorkflowEntity();
@@ -627,9 +605,6 @@ export class WorkflowsController {
 	@Delete('/:workflowId')
 	@ProjectScope('workflow:delete')
 	async delete(req: AuthenticatedRequest, _res: Response, @Param('workflowId') workflowId: string) {
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:delete');
-
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'delete');
 
 		const workflow = await this.workflowService.delete(req.user, workflowId);
@@ -653,9 +628,6 @@ export class WorkflowsController {
 		_res: Response,
 		@Param('workflowId') workflowId: string,
 	) {
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:delete');
-
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'archive');
 
 		const workflow = await this.workflowService.archive(req.user, workflowId);
@@ -683,9 +655,6 @@ export class WorkflowsController {
 		_res: Response,
 		@Param('workflowId') workflowId: string,
 	) {
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:delete');
-
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'unarchive');
 
 		const workflow = await this.workflowService.unarchive(req.user, workflowId);
@@ -714,9 +683,6 @@ export class WorkflowsController {
 		@Param('workflowId') workflowId: string,
 		@Body body: ActivateWorkflowDto,
 	) {
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:activate');
-
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'activate');
 
 		const { versionId, name, description, expectedChecksum } = body;
@@ -740,9 +706,6 @@ export class WorkflowsController {
 	@ProjectScope('workflow:publish')
 	async deactivate(req: WorkflowRequest.Deactivate) {
 		const { workflowId } = req.params;
-
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:deactivate');
 
 		await this.collaborationService.validateWriteLock(req.user.id, workflowId, 'deactivate');
 
@@ -768,7 +731,7 @@ export class WorkflowsController {
 
 		const workflowId = req.params.workflowId;
 
-		// Permission = MAX(DBX, N8N) - allow if EITHER system grants access
+		// Permission = MERGE(DBX, N8N) - allow if EITHER system grants access
 		const hasDatabricksAccess =
 			this.globalConfig.databricks.rbacEnabled &&
 			(await this.hasDatabricksScope(req, workflowId, 'workflow:execute'));
@@ -823,9 +786,6 @@ export class WorkflowsController {
 	async share(req: WorkflowRequest.Share) {
 		const { workflowId } = req.params;
 		const { shareWithIds } = req.body;
-
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:share');
 
 		if (
 			!Array.isArray(shareWithIds) ||
@@ -896,9 +856,6 @@ export class WorkflowsController {
 		@Param('workflowId') workflowId: string,
 		@Body body: TransferWorkflowBodyDto,
 	) {
-		// Check Databricks RBAC permission (after n8n access control)
-		await this.checkDatabricksPermission(req, workflowId, 'workflow:move');
-
 		return await this.enterpriseWorkflowService.transferWorkflow(
 			req.user,
 			workflowId,
