@@ -135,6 +135,7 @@ export class ControllerRegistry {
 			skipAuth?: boolean;
 			allowSkipMFA?: boolean;
 			allowSkipPreviewAuth?: boolean;
+			allowUnauthenticated?: boolean;
 			ipRateLimit?: boolean | RateLimiterLimits;
 			keyedRateLimit?: KeyedRateLimiterConfig;
 			licenseFeature?: BooleanLicenseFeature;
@@ -171,6 +172,7 @@ export class ControllerRegistry {
 				this.authService.createAuthMiddleware({
 					allowSkipMFA: route.allowSkipMFA ?? false,
 					allowSkipPreviewAuth: route.allowSkipPreviewAuth ?? false,
+					allowUnauthenticated: route.allowUnauthenticated ?? false,
 				}),
 				this.lastActiveAtService.middleware.bind(this.lastActiveAtService) as RequestHandler,
 			);
