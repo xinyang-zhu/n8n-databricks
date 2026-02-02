@@ -50,6 +50,9 @@ const availableGroups = ref<Array<{ id: string; displayName: string }>>([]);
 const availableServicePrincipals = ref<
 	Array<{ id: string; applicationId: string; displayName: string }>
 >([]);
+const currentDatabricksUser = ref<{ id: string; userName: string; displayName: string } | null>(
+	null,
+);
 
 interface PrincipalOption {
 	value: string;
@@ -162,23 +165,29 @@ const displayedGroups = computed(() => {
 const initialize = async () => {
 	isLoading.value = true;
 	try {
-		const [permResponse, usersResponse, groupsResponse, servicePrincipalsResponse] =
-			await Promise.all([
-				databricksApi.getSecurablePermissions(
-					rootStore.restApiContext,
-					props.data.securableType,
-					props.data.securableId,
-				),
-				databricksApi
-					.getDatabricksUsers(rootStore.restApiContext)
-					.catch(() => ({ users: [], totalResults: 0 })),
-				databricksApi
-					.getDatabricksGroups(rootStore.restApiContext)
-					.catch(() => ({ groups: [], totalResults: 0 })),
-				databricksApi
-					.getDatabricksServicePrincipals(rootStore.restApiContext)
-					.catch(() => ({ servicePrincipals: [], totalResults: 0 })),
-			]);
+		const [
+			permResponse,
+			usersResponse,
+			groupsResponse,
+			servicePrincipalsResponse,
+			currentUserResponse,
+		] = await Promise.all([
+			databricksApi.getSecurablePermissions(
+				rootStore.restApiContext,
+				props.data.securableType,
+				props.data.securableId,
+			),
+			databricksApi
+				.getDatabricksUsers(rootStore.restApiContext)
+				.catch(() => ({ users: [], totalResults: 0 })),
+			databricksApi
+				.getDatabricksGroups(rootStore.restApiContext)
+				.catch(() => ({ groups: [], totalResults: 0 })),
+			databricksApi
+				.getDatabricksServicePrincipals(rootStore.restApiContext)
+				.catch(() => ({ servicePrincipals: [], totalResults: 0 })),
+			databricksApi.getDatabricksCurrentUser(rootStore.restApiContext).catch(() => null),
+		]);
 		permissionGroups.value = permResponse.permissionGroups;
 		// Create a deep copy for local editing
 		localPermissionGroups.value = deepCopy(permResponse.permissionGroups);
@@ -188,6 +197,33 @@ const initialize = async () => {
 		availableUsers.value = usersResponse.users;
 		availableGroups.value = groupsResponse.groups;
 		availableServicePrincipals.value = servicePrincipalsResponse.servicePrincipals;
+		currentDatabricksUser.value = currentUserResponse;
+
+		// Ensure current user is in BOTH lists for display name resolution
+		// (permissions may be stored with either principalType, regardless of actual type)
+		if (currentUserResponse) {
+			// Add to users list if not present
+			const existsInUsers = availableUsers.value.some((u) => u.id === currentUserResponse.id);
+			if (!existsInUsers) {
+				availableUsers.value.push({
+					id: currentUserResponse.id,
+					email: currentUserResponse.userName,
+					displayName: currentUserResponse.displayName || currentUserResponse.userName,
+				});
+			}
+
+			// Add to service principals list if not present
+			const existsInSPs = availableServicePrincipals.value.some(
+				(sp) => sp.id === currentUserResponse.id,
+			);
+			if (!existsInSPs) {
+				availableServicePrincipals.value.push({
+					id: currentUserResponse.id,
+					applicationId: currentUserResponse.userName,
+					displayName: currentUserResponse.displayName || currentUserResponse.userName,
+				});
+			}
+		}
 
 		// Reset change tracking
 		hasChanges.value = false;

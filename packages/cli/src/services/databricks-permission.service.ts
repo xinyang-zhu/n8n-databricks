@@ -301,12 +301,9 @@ export class DatabricksPermissionService {
 				groupIds: userData.groups?.map((g) => g.value) ?? [],
 			};
 
-			this.logger.info('[Databricks RBAC] Identified principal from token', {
-				userId: userData.id,
-				userName: userData.userName,
-				displayName: userData.displayName,
-				groupCount: identity.groupIds.length,
-			});
+			this.logger.info(
+				`[Databricks RBAC] Identified principal: id=${userData.id}, userName=${userData.userName}, displayName=${userData.displayName}, groups=${identity.groupIds.length}`,
+			);
 
 			// Cache by token
 			this.identityCache.set(databricksToken, {
@@ -359,14 +356,9 @@ export class DatabricksPermissionService {
 			);
 		}
 
-		this.logger.info('[Databricks RBAC] Granted scopes', {
-			action: 'grant',
-			securableType,
-			securableId,
-			principalType,
-			principalId,
-			grantedScopes: scopes,
-		});
+		this.logger.info(
+			`[Databricks RBAC] Granted scopes: ${securableType}/${securableId} -> ${principalType}:${principalId} = [${scopes.join(', ')}]`,
+		);
 
 		return await this.getPermissionGroups(securableType, securableId);
 	}

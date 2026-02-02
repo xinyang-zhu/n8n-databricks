@@ -262,12 +262,28 @@ export class WorkflowsController {
 		// Initialize Databricks permissions - grant all scopes to creator
 		if (this.globalConfig.databricks.rbacEnabled) {
 			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
+			const tokenSource = databricksToken
+				? req.headers['x-databricks-token']
+					? 'header'
+					: req.cookies?.databricks_token
+						? 'cookie'
+						: 'forwarded'
+				: 'none';
+			this.logger.info(
+				`[Databricks RBAC] Workflow ${savedWorkflow.id} creation - token: ${!!databricksToken}, source: ${tokenSource}`,
+			);
 			if (databricksToken) {
 				try {
 					const creatorIdentity =
 						await this.databricksPermissionService.getDatabricksIdentity(databricksToken);
+					this.logger.info(
+						`[Databricks RBAC] Workflow ${savedWorkflow.id} - creator identity: ${creatorIdentity.userId} (${creatorIdentity.groupIds.length} groups)`,
+					);
 					// Grant all workflow scopes to the creator
 					const allWorkflowScopes = this.databricksPermissionService.getAvailableScopes('workflow');
+					this.logger.info(
+						`[Databricks RBAC] Workflow ${savedWorkflow.id} - granting ${allWorkflowScopes.length} scopes to user:${creatorIdentity.userId}`,
+					);
 					await this.databricksPermissionService.grantScopes(
 						'workflow',
 						savedWorkflow.id,
@@ -276,11 +292,14 @@ export class WorkflowsController {
 						[...allWorkflowScopes],
 					);
 				} catch (error) {
-					this.logger.warn('Failed to initialize Databricks permissions for workflow', {
-						workflowId: savedWorkflow.id,
-						error: (error as Error).message,
-					});
+					this.logger.warn(
+						`[Databricks RBAC] Workflow ${savedWorkflow.id} - failed to grant permissions: ${(error as Error).message}`,
+					);
 				}
+			} else {
+				this.logger.warn(
+					`[Databricks RBAC] Workflow ${savedWorkflow.id} - no token found, n8n user: ${req.user.id}`,
+				);
 			}
 		}
 
