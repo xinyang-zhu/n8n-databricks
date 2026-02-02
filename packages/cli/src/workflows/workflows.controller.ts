@@ -126,6 +126,40 @@ export class WorkflowsController {
 		);
 	}
 
+	/**
+	 * Get merged scopes from both n8n and Databricks systems.
+	 * MERGE(DBX, N8N) = union of scopes from both systems.
+	 */
+	private async getMergedWorkflowScopes(
+		req: AuthenticatedRequest,
+		workflowId: string,
+	): Promise<string[]> {
+		const scopeSet = new Set<string>();
+
+		// Add n8n scopes
+		const n8nScopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
+		for (const scope of n8nScopes) {
+			scopeSet.add(scope);
+		}
+
+		// Add Databricks scopes if enabled
+		if (this.globalConfig.databricks.rbacEnabled) {
+			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
+			if (databricksToken) {
+				const databricksScopes = await this.databricksPermissionService.getScopes(
+					'workflow',
+					workflowId,
+					databricksToken,
+				);
+				for (const scope of databricksScopes) {
+					scopeSet.add(scope);
+				}
+			}
+		}
+
+		return Array.from(scopeSet);
+	}
+
 	@Post('/')
 	async create(req: AuthenticatedRequest, _res: unknown, @Body body: CreateWorkflowDto) {
 		if (body.id) {
@@ -290,6 +324,7 @@ export class WorkflowsController {
 						'user',
 						creatorIdentity.userId,
 						[...allWorkflowScopes],
+						creatorIdentity.displayName,
 					);
 				} catch (error) {
 					this.logger.warn(
@@ -326,7 +361,7 @@ export class WorkflowsController {
 			uiContext: body.uiContext,
 		});
 
-		const scopes = await this.workflowService.getWorkflowScopes(req.user, savedWorkflow.id);
+		const scopes = await this.getMergedWorkflowScopes(req, savedWorkflow.id);
 
 		const checksum = await calculateWorkflowChecksum(savedWorkflow);
 
@@ -509,14 +544,8 @@ export class WorkflowsController {
 			workflow = found;
 		}
 
-		// Compute scopes - use n8n scopes if available, otherwise derive from Databricks permission
-		let scopes: readonly string[];
-		if (hasN8nAccess) {
-			scopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
-		} else {
-			// Only Databricks access - grant read scope
-			scopes = ['workflow:read'] as const;
-		}
+		// Compute scopes - MERGE(DBX, N8N) = union of scopes from both systems
+		const scopes = await this.getMergedWorkflowScopes(req, workflowId);
 
 		if (this.license.isSharingEnabled()) {
 			const workflowWithMetaData = this.enterpriseWorkflowService.addOwnerAndSharings(workflow);
@@ -592,7 +621,7 @@ export class WorkflowsController {
 			autosaved,
 		});
 
-		const scopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
+		const scopes = await this.getMergedWorkflowScopes(req, workflowId);
 		const checksum = await calculateWorkflowChecksum(updatedWorkflow);
 
 		await this.collaborationService.broadcastWorkflowUpdate(workflowId, req.user.id);
@@ -703,7 +732,7 @@ export class WorkflowsController {
 			expectedChecksum,
 		});
 
-		const scopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
+		const scopes = await this.getMergedWorkflowScopes(req, workflowId);
 		const checksum = await calculateWorkflowChecksum(workflow);
 
 		await this.collaborationService.broadcastWorkflowUpdate(workflowId, req.user.id);
@@ -720,7 +749,7 @@ export class WorkflowsController {
 
 		const workflow = await this.workflowService.deactivateWorkflow(req.user, workflowId);
 
-		const scopes = await this.workflowService.getWorkflowScopes(req.user, workflowId);
+		const scopes = await this.getMergedWorkflowScopes(req, workflowId);
 		const checksum = await calculateWorkflowChecksum(workflow);
 
 		await this.collaborationService.broadcastWorkflowUpdate(workflowId, req.user.id);

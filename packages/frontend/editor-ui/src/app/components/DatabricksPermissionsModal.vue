@@ -350,6 +350,7 @@ const saveAllChanges = async () => {
 				group.principal.type,
 				group.principal.id,
 				group.scopes,
+				principalName,
 			);
 			changes.push(`Granted to ${principalName}: ${group.scopes.join(', ')}`);
 		}

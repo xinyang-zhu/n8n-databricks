@@ -94,12 +94,13 @@ export async function grantSecurableScopes(
 	principalType: 'user' | 'group' | 'servicePrincipal',
 	principalId: string,
 	scopes: string[],
+	principalDisplayName?: string,
 ): Promise<GrantRevokeResponse> {
 	return await makeRestApiRequest(
 		context,
 		'PUT',
 		`/databricks/permissions/${securableType}/${securableId}/grant`,
-		{ principalType, principalId, scopes },
+		{ principalType, principalId, scopes, principalDisplayName },
 	);
 }
 

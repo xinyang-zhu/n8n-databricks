@@ -14,6 +14,7 @@ interface GrantScopesDto {
 	principalType: 'user' | 'group' | 'servicePrincipal';
 	principalId: string;
 	scopes: string[]; // n8n scope names (e.g., 'workflow:read', 'workflow:execute')
+	principalDisplayName?: string; // Optional display name for logging/caching
 }
 
 interface RevokeScopesDto {
@@ -213,6 +214,7 @@ export class DatabricksPermissionsController {
 				body.principalType,
 				body.principalId,
 				body.scopes,
+				body.principalDisplayName,
 			);
 
 			return {

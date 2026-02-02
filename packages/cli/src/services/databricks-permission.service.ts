@@ -311,9 +311,6 @@ export class DatabricksPermissionService {
 		// Check cache - keyed by token, so different token = cache miss
 		const cached = this.identityCache.get(databricksToken);
 		if (cached && cached.expiresAt > Date.now()) {
-			this.logger.info(
-				`[Databricks RBAC] Identified principal (cached): id=${cached.identity.userId}, groups=${cached.identity.groupIds.length}${sourceInfo}`,
-			);
 			return cached.identity;
 		}
 

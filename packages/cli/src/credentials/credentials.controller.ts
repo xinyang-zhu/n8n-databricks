@@ -236,6 +236,7 @@ export class CredentialsController {
 						'user',
 						creatorIdentity.userId,
 						[...allCredentialScopes],
+						creatorIdentity.displayName,
 					);
 				} catch (error) {
 					this.logger.warn('Failed to initialize Databricks permissions for credential', {
