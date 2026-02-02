@@ -416,6 +416,9 @@ export class WorkflowsController {
 						const sharedRelations =
 							await this.sharedWorkflowRepository.getAllRelationsForWorkflows(newIds);
 
+						// Get projectId filter if specified
+						const filterProjectId = req.listQueryOptions?.filter?.projectId as string | undefined;
+
 						// Attach shared relations to workflows and add homeProject info
 						// Use ownershipService directly (same as workflowService.getMany does)
 						// This avoids the license check that gates enterpriseWorkflowService
@@ -425,7 +428,11 @@ export class WorkflowsController {
 
 							const workflowWithMeta = this.ownershipService.addOwnedByAndSharedWith(workflow);
 							delete workflowWithMeta.shared;
-							data.push(workflowWithMeta);
+
+							// Only add if matches projectId filter (or no filter specified)
+							if (!filterProjectId || workflowWithMeta.homeProject?.id === filterProjectId) {
+								data.push(workflowWithMeta);
+							}
 						}
 					}
 				}
