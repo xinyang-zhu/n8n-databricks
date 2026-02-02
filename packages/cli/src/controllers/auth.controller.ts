@@ -103,15 +103,13 @@ export class AuthController {
 				const databricksUser =
 					await this.databricksPermissionService.fetchCurrentUser(databricksToken);
 				let primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
+				const isServicePrincipal = !!databricksUser.applicationId;
 
-				// Handle service principals which have UUIDs instead of real emails
-				if (!primaryEmail || !primaryEmail.includes('@')) {
-					// For service principals, construct an email-like identifier
-					if (databricksUser.displayName && databricksUser.id) {
-						primaryEmail = `sp-${databricksUser.id}@databricks.local`;
-					} else {
-						throw new AuthError('Could not retrieve email from Databricks profile');
-					}
+				// Handle service principals which have applicationId instead of real emails
+				if (isServicePrincipal) {
+					primaryEmail = `${databricksUser.applicationId}@databricks.local`;
+				} else if (!primaryEmail || !primaryEmail.includes('@')) {
+					throw new AuthError('Could not retrieve email from Databricks profile');
 				}
 
 				user =
@@ -125,10 +123,20 @@ export class AuthController {
 					const randomPassword = await this.passwordUtility.hash(
 						Math.random().toString(36).slice(-16),
 					);
+
+					// Service principals: firstName=displayName, lastName=applicationId
+					// Users: split displayName into firstName/lastName
+					const firstName = isServicePrincipal
+						? (databricksUser.displayName ?? '')
+						: (databricksUser.displayName?.split(' ')[0] ?? '');
+					const lastName = isServicePrincipal
+						? (databricksUser.applicationId ?? '')
+						: (databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '');
+
 					const result = await this.userRepository.createUserWithProject({
 						email: primaryEmail,
-						firstName: databricksUser.displayName?.split(' ')[0] ?? '',
-						lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+						firstName,
+						lastName,
 						password: randomPassword,
 						role: { slug: 'global:member' },
 					});
@@ -257,15 +265,13 @@ export class AuthController {
 		try {
 			const databricksUser = await this.databricksPermissionService.fetchCurrentUser(token);
 			let primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
+			const isServicePrincipal = !!databricksUser.applicationId;
 
-			// Handle service principals which have UUIDs instead of real emails
-			if (!primaryEmail || !primaryEmail.includes('@')) {
-				// For service principals, construct an email-like identifier
-				if (databricksUser.displayName && databricksUser.id) {
-					primaryEmail = `sp-${databricksUser.id}@databricks.local`;
-				} else {
-					throw new AuthError('Could not retrieve email from Databricks profile');
-				}
+			// Handle service principals which have applicationId instead of real emails
+			if (isServicePrincipal) {
+				primaryEmail = `${databricksUser.applicationId}@databricks.local`;
+			} else if (!primaryEmail || !primaryEmail.includes('@')) {
+				throw new AuthError('Could not retrieve email from Databricks profile');
 			}
 
 			let user =
@@ -279,10 +285,20 @@ export class AuthController {
 				const randomPassword = await this.passwordUtility.hash(
 					Math.random().toString(36).slice(-16),
 				);
+
+				// Service principals: firstName=displayName, lastName=applicationId
+				// Users: split displayName into firstName/lastName
+				const firstName = isServicePrincipal
+					? (databricksUser.displayName ?? '')
+					: (databricksUser.displayName?.split(' ')[0] ?? '');
+				const lastName = isServicePrincipal
+					? (databricksUser.applicationId ?? '')
+					: (databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '');
+
 				const result = await this.userRepository.createUserWithProject({
 					email: primaryEmail,
-					firstName: databricksUser.displayName?.split(' ')[0] ?? '',
-					lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
+					firstName,
+					lastName,
 					password: randomPassword,
 					role: { slug: 'global:member' },
 				});
