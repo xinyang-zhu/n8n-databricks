@@ -405,12 +405,20 @@ export class WorkflowsController {
 						const additionalWorkflows = await this.workflowRepository.find({
 							where: { id: In(newIds) },
 							relations: {
-								shared: {
-									project: true,
-								},
 								tags: !this.globalConfig.tags.disabled,
 							},
 						});
+
+						// Fetch all shared relations with project data (same as service does)
+						// This ensures we get proper homeProject info for the owner
+						const sharedRelations =
+							await this.sharedWorkflowRepository.getAllRelationsForWorkflows(newIds);
+
+						// Attach shared relations to workflows
+						for (const workflow of additionalWorkflows) {
+							(workflow as WorkflowEntity & { shared: SharedWorkflow[] }).shared =
+								sharedRelations.filter((r) => r.workflowId === workflow.id);
+						}
 
 						// Add owner/sharing info if sharing is enabled
 						if (this.license.isSharingEnabled()) {
@@ -524,13 +532,7 @@ export class WorkflowsController {
 			workflow = workflowViaN8n;
 		} else {
 			// User has Databricks access but not n8n access - fetch directly
-			const relations: FindOptionsRelations<WorkflowEntity> = {
-				shared: {
-					project: {
-						projectRelations: true,
-					},
-				},
-			};
+			const relations: FindOptionsRelations<WorkflowEntity> = {};
 			if (!this.globalConfig.tags.disabled) {
 				relations.tags = true;
 			}
@@ -541,6 +543,14 @@ export class WorkflowsController {
 			if (!found) {
 				throw new NotFoundError(`Workflow with ID "${workflowId}" does not exist`);
 			}
+
+			// Fetch shared relations with project data (same as service does)
+			// This ensures we get proper homeProject info for the owner
+			const sharedRelations = await this.sharedWorkflowRepository.getAllRelationsForWorkflows([
+				workflowId,
+			]);
+			(found as WorkflowEntity & { shared: SharedWorkflow[] }).shared = sharedRelations;
+
 			workflow = found;
 		}
 
