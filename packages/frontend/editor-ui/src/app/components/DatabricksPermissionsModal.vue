@@ -779,8 +779,9 @@ onMounted(async () => {
 
 .scopeOptionDescription {
 	font-size: var(--font-size--2xs);
-	color: var(--color--text--tint-2);
+	color: var(--color--text--tint-1);
 	line-height: var(--line-height--md);
+	opacity: 0.7;
 }
 
 .emptyState {

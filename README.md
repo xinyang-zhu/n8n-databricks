@@ -2,91 +2,84 @@
 
 An internal fork of [n8n](https://github.com/n8n-io/n8n) with Databricks authentication integration.
 
-## Purpose
+## Disclaimer
 
 This repository is a **community-driven development fork** of n8n for **internal business use only**. It is:
 
-- **NOT** affiliated with, endorsed by, or sponsored by Databricks, Inc.
+- **NOT** affiliated with, endorsed by, or sponsored by Databricks, Inc. or n8n GmbH
 - **NOT** a product, distribution, or alternative to n8n
-- **NOT** intended for public consumption or third-party hosting
-- **NOT** using any n8n Enterprise (`.ee.`) features
+- **NOT** referring or using any enterprise licensed code (files that contain `.ee.` in their filename or `.ee` in their dirname)
+
+The license for this fork is **NOT modified**. By using this fork, you must follow the same [Sustainable Use License](https://github.com/n8n-io/n8n/blob/master/LICENSE.md) as the original n8n project.
+
+This fork is provided **as-is** and will only support a limited number of n8n versions. It may not be kept up-to-date with the latest upstream releases.
+
+For official resources:
+- **n8n**: https://n8n.io | https://docs.n8n.io
+- **Databricks**: https://databricks.com
 
 "Databricks" is a trademark of Databricks, Inc. This project merely integrates with Databricks services.
 
-This fork exists as a public GitHub repository only because GitHub requires forks of public repositories to be public. This is a standard development workflow, not a redistribution.
+## Features
 
-## Modifications
+### Databricks Authentication
 
-### Databricks Token Authentication
+- **Federated Login**: Automatic authentication via reverse proxy with `x-forwarded-access-token` header (for Databricks Apps deployment)
+- **Token Login**: Users can authenticate using their Databricks Personal Access Token (PAT)
+- **Auto-provisioning**: Users are automatically created on first login
 
-- Users authenticate using Databricks personal access tokens
-- Automatic user provisioning on first login
-- `DATABRICKS_HOST` environment variable integration (protocol prefix auto-stripped)
-- Login page displays the configured Databricks host
+### Databricks RBAC (Role-Based Access Control)
 
-### Files Modified
-
-- `packages/@n8n/api-types/src/frontend-settings.ts` - Added `databricksHost` to frontend settings
-- `packages/cli/src/controllers/auth.controller.ts` - Databricks token login endpoint
-- `packages/cli/src/auth/auth.service.ts` - Databricks token authentication middleware
-
-## License Compliance
-
-### Sustainable Use License
-
-This fork complies with the [Sustainable Use License](https://github.com/n8n-io/n8n/blob/master/LICENSE.md):
-
-| Requirement | Status |
-|-------------|--------|
-| Internal business use only | Yes |
-| No third-party hosting | Yes |
-| No removal of license/attribution | Yes |
-| No use of Enterprise (.ee.) features | Yes |
-
-### What This License Allows
-
-- Using, copying, and modifying the software for **internal business purposes**
-- Self-hosting for internal company use
-- Adding custom integrations and authentication
-
-### What This License Prohibits
-
-- Offering n8n to third parties on a hosted or embedded basis
-- Removing or obscuring licensing, copyright, or other notices
-- Using Enterprise License features without a license
-
-### Enterprise Features (.ee.)
-
-This fork does **NOT** use any `.ee.` files. Enterprise features include but are not limited to:
-- SAML/LDAP authentication
-- Source control (Git-based workflows)
-- External secrets management
-- Workflow/credential sharing between users
-- Advanced RBAC and permissions
-- Audit logging
-- Variables
-
-These features require an [Enterprise License](https://github.com/n8n-io/n8n/blob/master/LICENSE_EE.md) from n8n GmbH.
+- Grant permissions to Databricks users, groups, and service principals
+- Control access to workflows, credentials, and data tables
+- Works independently from n8n's native permissions (OR logic - access granted if either system allows)
 
 ## Environment Variables
 
+### Databricks Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABRICKS_HOST` | _(required)_ | Databricks workspace host (e.g., `your-workspace.cloud.databricks.com`). Protocol prefix is auto-stripped. |
+| `DATABRICKS_CLIENT_ID` | _(optional)_ | Service principal client ID for SCIM API calls. Required for listing users/groups/service-principals in the permissions modal. |
+| `DATABRICKS_CLIENT_SECRET` | _(optional)_ | Service principal client secret for SCIM API calls. |
+| `N8N_DATABRICKS_RBAC_ENABLED` | `true` | Enable Databricks-based permissions for workflows, credentials, and data tables. Works independently from n8n's native permissions (OR logic). |
+
+> **Note:** If `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET` are not set, the permissions modal will still work but won't be able to list available principals from Databricks.
+
 ### Authentication Methods
 
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `N8N_AUTH_DATABRICKS_FEDERATED_ENABLED` | `false` | Enable Databricks federated login via reverse proxy with `x-forwarded-access-token` header. Use this when deploying on Databricks Apps. |
+| `N8N_AUTH_DATABRICKS_TOKEN_ENABLED` | `false` | Enable Databricks token login where users provide their Personal Access Token (PAT). |
+| `N8N_AUTH_EMAIL_ENABLED` | `true` | Enable email/password login. |
+| `N8N_AUTH_SIGNUP_ENABLED` | `true` | Enable user sign-up. First user becomes owner, subsequent users need invite. |
+
+### Example Configurations
+
+**Databricks Apps Deployment (Federated Login Only):**
 ```bash
-# Databricks Configuration
-DATABRICKS_HOST=your-workspace.cloud.databricks.com  # http(s):// prefix optional, will be stripped
+DATABRICKS_HOST=your-workspace.cloud.databricks.com
+N8N_AUTH_DATABRICKS_FEDERATED_ENABLED=true
+N8N_AUTH_EMAIL_ENABLED=false
+N8N_DATABRICKS_RBAC_ENABLED=true
+DATABRICKS_CLIENT_ID=your-service-principal-client-id
+DATABRICKS_CLIENT_SECRET=your-service-principal-secret
+```
 
-# Enable/disable Databricks federated login (via reverse proxy with x-forwarded-access-token)
-N8N_AUTH_DATABRICKS_FEDERATED_ENABLED=true  # default: false
+**Local Development (Token + Email Login):**
+```bash
+DATABRICKS_HOST=your-workspace.cloud.databricks.com
+N8N_AUTH_DATABRICKS_TOKEN_ENABLED=true
+N8N_AUTH_EMAIL_ENABLED=true
+N8N_DATABRICKS_RBAC_ENABLED=true
+```
 
-# Enable/disable Databricks token login (user provides their PAT)
-N8N_AUTH_DATABRICKS_TOKEN_ENABLED=true  # default: false
-
-# Enable/disable email/password login
-N8N_AUTH_EMAIL_ENABLED=true  # default: true
-
-# Enable/disable user sign-up (first user becomes owner, subsequent users need invite)
-N8N_AUTH_SIGNUP_ENABLED=true  # default: true
+**Standard n8n (No Databricks):**
+```bash
+N8N_AUTH_EMAIL_ENABLED=true
+N8N_DATABRICKS_RBAC_ENABLED=false
 ```
 
 ### Database (PostgreSQL recommended)
@@ -99,54 +92,3 @@ DB_POSTGRESDB_DATABASE=n8n
 DB_POSTGRESDB_USER=n8n
 DB_POSTGRESDB_PASSWORD=your-password
 ```
-
-## Development
-
-```bash
-# Install dependencies
-pnpm install
-
-# Build all packages
-pnpm build > build.log 2>&1
-
-# Run development server
-pnpm dev
-
-# Access at http://localhost:5678
-```
-
-## Deployment
-
-For production deployment on Databricks Apps:
-
-```bash
-# Build production package
-node scripts/build-n8n.mjs
-
-# The compiled/ directory contains the production build
-# Run: pnpm install && pnpm start
-```
-
-## Upstream
-
-This fork tracks [n8n-io/n8n](https://github.com/n8n-io/n8n). To sync with upstream:
-
-```bash
-git fetch upstream
-git merge upstream/master
-```
-
-## Disclaimer
-
-This is a community-driven project and is **not affiliated with Databricks, Inc.** or n8n GmbH. Use at your own risk.
-
-For official resources:
-- **n8n**: https://n8n.io | https://docs.n8n.io | license@n8n.io
-- **Databricks**: https://databricks.com
-
-
-## Run locally
-
-## Deploy
-
-./build-deploy.sh
