@@ -133,21 +133,25 @@ export class DatabricksPermissionService {
 	// ============================================================
 
 	/**
-	 * Extract Databricks token from request headers.
-	 * Token MUST be in the request header - no server-side caching.
+	 * Extract Databricks token from request.
 	 *
-	 * Checks headers in order:
-	 * 1. x-databricks-token header (explicit token from frontend)
+	 * Checks in order:
+	 * 1. x-databricks-token header (explicit token)
 	 * 2. x-forwarded-access-token header (from reverse proxy with OAuth2)
 	 * 3. x-forwarded-token header (alternative reverse proxy header)
+	 * 4. databricks_token cookie (set during login with token)
 	 */
-	getTokenFromRequest(req: { headers: Record<string, unknown> }): string | undefined {
+	getTokenFromRequest(req: {
+		headers: Record<string, unknown>;
+		cookies?: Record<string, string | undefined>;
+	}): string | undefined {
 		const headerToken = req.headers['x-databricks-token'] as string | undefined;
 		const forwardedToken =
 			(req.headers['x-forwarded-access-token'] as string | undefined) ||
 			(req.headers['x-forwarded-token'] as string | undefined);
+		const cookieToken = req.cookies?.databricks_token;
 
-		return headerToken || forwardedToken;
+		return headerToken || forwardedToken || cookieToken;
 	}
 
 	/**

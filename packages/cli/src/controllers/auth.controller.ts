@@ -137,6 +137,14 @@ export class AuthController {
 
 				this.authService.issueCookie(res, user, false, req.browserId);
 
+				// Set Databricks token cookie for subsequent API requests
+				res.cookie('databricks_token', databricksToken, {
+					httpOnly: true,
+					secure: this.globalConfig.endpoints.rest !== 'http://localhost:5678/rest',
+					sameSite: 'lax',
+					maxAge: 24 * 60 * 60 * 1000, // 24 hours
+				});
+
 				// Create or update auth identity for Databricks
 				await this.ensureDatabricksAuthIdentity(user, databricksUser.id);
 
@@ -393,6 +401,7 @@ export class AuthController {
 	async logout(req: AuthenticatedRequest, res: Response) {
 		await this.authService.invalidateToken(req);
 		this.authService.clearCookie(res);
+		res.clearCookie('databricks_token');
 		return { loggedOut: true };
 	}
 
