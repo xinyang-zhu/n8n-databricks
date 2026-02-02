@@ -98,8 +98,18 @@ export class CredentialsController {
 							req.user,
 							{ includeScopes: query.includeScopes },
 						);
+
+						// Get projectId filter if specified
+						const filterProjectId = req.listQueryOptions?.filter?.projectId as string | undefined;
+
 						for (const credential of additionalCredentials) {
-							credentials.push(credential);
+							// Only add if matches projectId filter (or no filter specified)
+							// Cast to access homeProject which is added by addOwnedByAndSharedWith in getManyByIds
+							const homeProjectId = (credential as { homeProject?: { id: string } }).homeProject
+								?.id;
+							if (!filterProjectId || homeProjectId === filterProjectId) {
+								credentials.push(credential);
+							}
 						}
 					}
 				} catch (error) {
