@@ -8,6 +8,7 @@ import { useClipboard } from '@/app/composables/useClipboard';
 import { useDebugInfo } from '@/app/composables/useDebugInfo';
 import { useI18n } from '@n8n/i18n';
 import { getThirdPartyLicenses } from '@n8n/rest-api-client';
+import { N8N_MAIN_GITHUB_REPO_URL } from '../constants';
 
 import { ElCol, ElRow } from 'element-plus';
 import { N8nButton, N8nLink, N8nText } from '@n8n/design-system';
@@ -73,7 +74,7 @@ const copyDebugInfoToClipboard = async () => {
 						<N8nText>{{ i18n.baseText('about.sourceCode') }}</N8nText>
 					</ElCol>
 					<ElCol :span="16">
-						<N8nLink to="https://github.com/n8n-io/n8n">https://github.com/n8n-io/n8n</N8nLink>
+						<N8nLink :to="N8N_MAIN_GITHUB_REPO_URL">{{ N8N_MAIN_GITHUB_REPO_URL }}</N8nLink>
 					</ElCol>
 				</ElRow>
 				<ElRow>

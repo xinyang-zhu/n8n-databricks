@@ -427,6 +427,11 @@ onMounted(async () => {
 
 					<!-- Permission Rows -->
 					<div :class="$style.tableBody">
+						<!-- Empty state when no permissions -->
+						<div v-if="displayedGroups.length === 0 && canManage" :class="$style.emptyStateInline">
+							No Databricks permissions granted yet
+						</div>
+
 						<div
 							v-for="group in displayedGroups"
 							:key="`${group.principal.type}-${group.principal.id}`"
@@ -675,12 +680,6 @@ onMounted(async () => {
 	display: flex;
 	align-items: center;
 	padding: var(--spacing--xs) 0;
-	border-radius: var(--radius);
-	background: transparent;
-
-	&:hover {
-		background: var(--color--background--light-2);
-	}
 }
 
 .addRow {
@@ -780,13 +779,19 @@ onMounted(async () => {
 
 .scopeOptionDescription {
 	font-size: var(--font-size--2xs);
-	color: var(--color--text--tint-1);
+	color: var(--color--text--tint-2);
 	line-height: var(--line-height--md);
 }
 
 .emptyState {
 	padding: var(--spacing--xl);
 	text-align: center;
+	color: var(--color--text--tint-1);
+	font-size: var(--font-size--sm);
+}
+
+.emptyStateInline {
+	padding: var(--spacing--sm) 0;
 	color: var(--color--text--tint-1);
 	font-size: var(--font-size--sm);
 }
