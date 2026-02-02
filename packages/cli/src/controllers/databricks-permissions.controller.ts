@@ -8,7 +8,6 @@ import axios from 'axios';
 
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
-import { userHasScopes } from '@/permissions.ee/check-access';
 import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 
 interface GrantScopesDto {
@@ -128,37 +127,6 @@ export class DatabricksPermissionsController {
 	// ============================================================
 
 	/**
-	 * Check if user can manage Databricks permissions for a resource.
-	 * Uses MERGE(DBX, N8N) logic: user can manage if EITHER system grants share permission.
-	 */
-	private async canManagePermissions(
-		req: AuthenticatedRequest,
-		securableType: DatabricksSecurableType,
-		securableId: string,
-		databricksScopes: string[],
-	): Promise<boolean> {
-		// Check Databricks share permission
-		const hasDatabricksShare = databricksScopes.includes(`${securableType}:share`);
-
-		if (hasDatabricksShare) {
-			return true;
-		}
-
-		// Check n8n share permission - MERGE logic
-		const n8nShareScope = `${securableType}:share`;
-		const scopeContext =
-			securableType === 'workflow'
-				? { workflowId: securableId }
-				: securableType === 'credential'
-					? { credentialId: securableId }
-					: {};
-
-		const hasN8nShare = await userHasScopes(req.user, [n8nShareScope], false, scopeContext);
-
-		return hasN8nShare;
-	}
-
-	/**
 	 * Get permissions for any securable resource
 	 */
 	@Get('/permissions/:securableType/:securableId')
@@ -183,16 +151,13 @@ export class DatabricksPermissionsController {
 		);
 		const availableScopes = this.permissionService.getAvailableScopes(securableType);
 
-		// MERGE(DBX, N8N): user can manage if EITHER system grants share permission
-		const canManage = await this.canManagePermissions(req, securableType, securableId, userScopes);
-
 		return {
 			securableType,
 			securableId,
 			permissionGroups,
 			currentUserScopes: userScopes,
 			availableScopes: [...availableScopes],
-			canManage,
+			canManage: userScopes.includes(`${securableType}:share`),
 		};
 	}
 
@@ -233,19 +198,12 @@ export class DatabricksPermissionsController {
 		}
 
 		try {
-			// MERGE(DBX, N8N): Check if user can manage via either system
 			const userScopes = await this.permissionService.getScopes(
 				securableType,
 				securableId,
 				databricksToken,
 			);
-			const canManage = await this.canManagePermissions(
-				req,
-				securableType,
-				securableId,
-				userScopes,
-			);
-			if (!canManage) {
+			if (!userScopes.includes(`${securableType}:share`)) {
 				throw new ForbiddenError('You do not have permission to manage this resource');
 			}
 
@@ -260,6 +218,14 @@ export class DatabricksPermissionsController {
 			return {
 				success: true,
 				permissionGroups,
+				notification: {
+					action: 'granted',
+					securableType,
+					securableId,
+					principalType: body.principalType,
+					principalId: body.principalId,
+					scopes: body.scopes,
+				},
 			};
 		} catch (error) {
 			if (error instanceof Error && error.message.includes('permission')) {
@@ -294,23 +260,17 @@ export class DatabricksPermissionsController {
 		}
 
 		try {
-			// MERGE(DBX, N8N): Check if user can manage via either system
 			const userScopes = await this.permissionService.getScopes(
 				securableType,
 				securableId,
 				databricksToken,
 			);
-			const canManage = await this.canManagePermissions(
-				req,
-				securableType,
-				securableId,
-				userScopes,
-			);
-			if (!canManage) {
+			if (!userScopes.includes(`${securableType}:share`)) {
 				throw new ForbiddenError('You do not have permission to manage this resource');
 			}
 
 			let permissionGroups;
+			let revokedScopes: string[];
 			if (body.scopes && Array.isArray(body.scopes) && body.scopes.length > 0) {
 				// Revoke specific scopes
 				permissionGroups = await this.permissionService.revokeScopes(
@@ -320,6 +280,7 @@ export class DatabricksPermissionsController {
 					body.principalId,
 					body.scopes,
 				);
+				revokedScopes = body.scopes;
 			} else {
 				// Revoke all scopes for the principal
 				permissionGroups = await this.permissionService.revokeAllScopes(
@@ -328,11 +289,20 @@ export class DatabricksPermissionsController {
 					body.principalType,
 					body.principalId,
 				);
+				revokedScopes = ['all'];
 			}
 
 			return {
 				success: true,
 				permissionGroups,
+				notification: {
+					action: 'revoked',
+					securableType,
+					securableId,
+					principalType: body.principalType,
+					principalId: body.principalId,
+					scopes: revokedScopes,
+				},
 			};
 		} catch (error) {
 			if (error instanceof Error && error.message.includes('permission')) {
@@ -375,19 +345,12 @@ export class DatabricksPermissionsController {
 		}
 
 		try {
-			// MERGE(DBX, N8N): Check if user can manage via either system
 			const userScopes = await this.permissionService.getScopes(
 				securableType,
 				securableId,
 				databricksToken,
 			);
-			const canManage = await this.canManagePermissions(
-				req,
-				securableType,
-				securableId,
-				userScopes,
-			);
-			if (!canManage) {
+			if (!userScopes.includes(`${securableType}:share`)) {
 				throw new ForbiddenError('You do not have permission to manage this resource');
 			}
 
@@ -402,6 +365,14 @@ export class DatabricksPermissionsController {
 			return {
 				success: true,
 				permissionGroups,
+				notification: {
+					action: 'set',
+					securableType,
+					securableId,
+					principalType: body.principalType,
+					principalId: body.principalId,
+					scopes: body.scopes,
+				},
 			};
 		} catch (error) {
 			if (error instanceof Error && error.message.includes('permission')) {
@@ -409,54 +380,6 @@ export class DatabricksPermissionsController {
 			}
 			throw error;
 		}
-	}
-
-	// ============================================================
-	// Legacy workflow-specific endpoints (for backwards compatibility)
-	// ============================================================
-
-	/**
-	 * @deprecated Use GET /permissions/workflow/:workflowId instead
-	 */
-	@Get('/workflows/:workflowId/permissions')
-	async getWorkflowPermissions(
-		req: AuthenticatedRequest,
-		res: Response,
-		@Param('workflowId') workflowId: string,
-	) {
-		const result = await this.getSecurablePermissions(req, res, 'workflow', workflowId);
-		// Return with legacy field name for backwards compatibility
-		return {
-			workflowId,
-			permissionGroups: result.permissionGroups,
-			currentUserScopes: result.currentUserScopes,
-			availableScopes: result.availableScopes,
-			canManage: result.canManage,
-		};
-	}
-
-	/**
-	 * @deprecated Use PUT /permissions/workflow/:workflowId/grant instead
-	 */
-	@Put('/workflows/:workflowId/permissions/grant')
-	async grantWorkflowPermission(
-		req: AuthenticatedRequest,
-		res: Response,
-		@Param('workflowId') workflowId: string,
-	) {
-		return await this.grantSecurableScopes(req, res, 'workflow', workflowId);
-	}
-
-	/**
-	 * @deprecated Use PUT /permissions/workflow/:workflowId/revoke instead
-	 */
-	@Put('/workflows/:workflowId/permissions/revoke')
-	async revokeWorkflowPermission(
-		req: AuthenticatedRequest,
-		res: Response,
-		@Param('workflowId') workflowId: string,
-	) {
-		return await this.revokeSecurableScopes(req, res, 'workflow', workflowId);
 	}
 
 	// ============================================================

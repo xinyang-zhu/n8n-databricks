@@ -284,11 +284,17 @@ const updateScopesLocal = (group: DatabricksPermissionGroup, scopes: string[]) =
 
 const saveAllChanges = async () => {
 	isSaving.value = true;
+	const changes: string[] = [];
+
 	try {
 		// Process all removals first
 		for (const key of pendingRemovals.value) {
 			const [type, ...idParts] = key.split(':');
 			const principalId = idParts.join(':');
+			const principalName = getPrincipalDisplayName(
+				type as 'user' | 'group' | 'servicePrincipal',
+				principalId,
+			);
 			await databricksApi.revokeSecurableScopes(
 				rootStore.restApiContext,
 				props.data.securableType,
@@ -296,6 +302,7 @@ const saveAllChanges = async () => {
 				type as 'user' | 'group' | 'servicePrincipal',
 				principalId,
 			);
+			changes.push(`Revoked all permissions from ${principalName}`);
 		}
 
 		// Process all updates to existing groups
@@ -316,6 +323,7 @@ const saveAllChanges = async () => {
 				!originalScopes.every((s) => currentScopes.includes(s));
 
 			if (scopesChanged) {
+				const principalName = getPrincipalDisplayName(group.principal.type, group.principal.id);
 				await databricksApi.setSecurableScopes(
 					rootStore.restApiContext,
 					props.data.securableType,
@@ -324,11 +332,13 @@ const saveAllChanges = async () => {
 					group.principal.id,
 					group.scopes,
 				);
+				changes.push(`Updated ${principalName}: ${group.scopes.join(', ')}`);
 			}
 		}
 
 		// Process all additions
 		for (const group of pendingAdditions.value) {
+			const principalName = getPrincipalDisplayName(group.principal.type, group.principal.id);
 			await databricksApi.grantSecurableScopes(
 				rootStore.restApiContext,
 				props.data.securableType,
@@ -337,12 +347,15 @@ const saveAllChanges = async () => {
 				group.principal.id,
 				group.scopes,
 			);
+			changes.push(`Granted to ${principalName}: ${group.scopes.join(', ')}`);
 		}
 
+		const changesSummary = changes.length > 0 ? changes.join('\n') : 'No changes made';
 		toast.showMessage({
-			title: 'Permissions saved',
-			message: 'Permission changes have been saved successfully.',
+			title: 'Databricks permissions saved',
+			message: changesSummary,
 			type: 'success',
+			duration: 5000,
 		});
 
 		// Reload to get fresh state

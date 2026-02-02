@@ -221,6 +221,31 @@ export class CredentialsController {
 			newCredential.id,
 		);
 
+		// Initialize Databricks permissions - grant all scopes to creator
+		if (this.globalConfig.databricks.rbacEnabled) {
+			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
+			if (databricksToken) {
+				try {
+					const creatorDatabricksId =
+						await this.databricksPermissionService.getCurrentUserDatabricksId(databricksToken);
+					const allCredentialScopes =
+						this.databricksPermissionService.getAvailableScopes('credential');
+					await this.databricksPermissionService.grantScopes(
+						'credential',
+						newCredential.id,
+						'user',
+						creatorDatabricksId,
+						[...allCredentialScopes],
+					);
+				} catch (error) {
+					this.logger.warn('Failed to initialize Databricks permissions for credential', {
+						credentialId: newCredential.id,
+						error: (error as Error).message,
+					});
+				}
+			}
+		}
+
 		this.eventService.emit('credentials-created', {
 			user: req.user,
 			credentialType: newCredential.type,

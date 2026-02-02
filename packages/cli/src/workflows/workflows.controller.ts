@@ -259,7 +259,7 @@ export class WorkflowsController {
 			throw new InternalServerError('Failed to save workflow');
 		}
 
-		// Initialize Databricks permissions - grant MANAGE to creator
+		// Initialize Databricks permissions - grant all scopes to creator
 		if (this.globalConfig.databricks.rbacEnabled) {
 			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 			if (databricksToken) {

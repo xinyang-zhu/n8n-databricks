@@ -32,9 +32,19 @@ export interface SecurablePermissionsResponse {
 	canManage: boolean;
 }
 
+export interface PermissionNotification {
+	action: 'granted' | 'revoked' | 'set';
+	securableType: DatabricksSecurableType;
+	securableId: string;
+	principalType: 'user' | 'group' | 'servicePrincipal';
+	principalId: string;
+	scopes: string[];
+}
+
 export interface GrantRevokeResponse {
 	success: boolean;
 	permissionGroups: DatabricksPermissionGroup[];
+	notification?: PermissionNotification;
 }
 
 export interface DatabricksGroupsResponse {
@@ -72,16 +82,6 @@ export async function getSecurablePermissions(
 		'GET',
 		`/databricks/permissions/${securableType}/${securableId}`,
 	);
-}
-
-/**
- * @deprecated Use getSecurablePermissions instead
- */
-export async function getWorkflowPermissions(
-	context: IRestApiContext,
-	workflowId: string,
-): Promise<SecurablePermissionsResponse> {
-	return getSecurablePermissions(context, 'workflow', workflowId);
 }
 
 /**

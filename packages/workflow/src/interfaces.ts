@@ -2953,29 +2953,6 @@ export interface DatabricksSecurablePermissions {
 	permission_groups: DatabricksPermissionGroup[];
 }
 
-/** @deprecated Use DatabricksSecurablePermissions instead */
-export type DatabricksWorkflowPermissions = DatabricksSecurablePermissions;
-
-/** @deprecated Use scopes (string) instead */
-export type DatabricksPermission = 'READ' | 'USE' | 'WRITE';
-
-/** @deprecated Use DATABRICKS_SECURABLE_SCOPES instead */
-export const DATABRICKS_SECURABLE_PERMISSIONS: Record<
-	DatabricksSecurableType,
-	DatabricksPermission[]
-> = {
-	workflow: ['READ', 'USE', 'WRITE'],
-	credential: ['READ', 'USE'],
-	data_table: ['READ', 'WRITE'],
-};
-
-/** @deprecated Use DATABRICKS_SCOPE_LABELS instead */
-export const DATABRICKS_PERMISSION_LABELS: Record<DatabricksPermission, string> = {
-	READ: 'Read',
-	USE: 'Use (Execute)',
-	WRITE: 'Write',
-};
-
 export interface WorkflowFEMeta {
 	onboardingId?: string;
 	templateId?: string;

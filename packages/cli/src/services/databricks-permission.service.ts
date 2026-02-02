@@ -1,33 +1,10 @@
 import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
 import { Service } from '@n8n/di';
-import type { User } from '@n8n/db';
 import { DatabricksSecurablePermissionRepository } from '@n8n/db';
 import type { DatabricksPermissionGroup, DatabricksSecurableType } from 'n8n-workflow';
 import { DATABRICKS_SECURABLE_SCOPES } from 'n8n-workflow';
 import axios from 'axios';
-
-/**
- * Legacy permission to new scope mapping.
- * USE = read + execute
- */
-const LEGACY_SCOPE_MAPPING: Record<string, Record<string, string[]>> = {
-	workflow: {
-		READ: ['workflow:read'],
-		USE: ['workflow:read', 'workflow:execute'],
-		WRITE: ['workflow:read', 'workflow:update', 'workflow:execute'],
-	},
-	credential: {
-		READ: ['credential:read'],
-		USE: ['credential:read'],
-		WRITE: ['credential:read', 'credential:update'],
-	},
-	data_table: {
-		READ: ['dataTable:read', 'dataTable:readRow'],
-		USE: ['dataTable:read', 'dataTable:readRow'],
-		WRITE: ['dataTable:read', 'dataTable:update', 'dataTable:readRow', 'dataTable:writeRow'],
-	},
-};
 
 /**
  * Service for managing Databricks permissions on securable resources.
@@ -265,26 +242,8 @@ export class DatabricksPermissionService {
 	}
 
 	/**
-	 * Convert legacy permission (USE, MANAGE, etc.) to new scope format.
-	 * Returns the input scope if it's not a legacy permission.
-	 */
-	private convertLegacyScope(securableType: DatabricksSecurableType, scope: string): string[] {
-		const mapping = LEGACY_SCOPE_MAPPING[securableType];
-		if (mapping && mapping[scope]) {
-			return mapping[scope];
-		}
-		// If it's already a valid new scope, return it as-is
-		if (this.isValidScope(securableType, scope)) {
-			return [scope];
-		}
-		// Unknown scope, return empty (or could return as-is)
-		return [];
-	}
-
-	/**
 	 * Get all permission groups for a securable resource.
 	 * Returns principals with their granted scopes.
-	 * Legacy permissions (READ, USE, WRITE) are converted to new scope format.
 	 */
 	async getPermissionGroups(
 		securableType: DatabricksSecurableType,
@@ -292,7 +251,7 @@ export class DatabricksPermissionService {
 	): Promise<DatabricksPermissionGroup[]> {
 		const permissions = await this.permissionRepository.findBySecurable(securableType, securableId);
 
-		// Group by principal, collecting all scopes (with legacy conversion)
+		// Group by principal, collecting all scopes
 		const groupMap = new Map<string, DatabricksPermissionGroup>();
 		for (const perm of permissions) {
 			const key = `${perm.principalType}:${perm.principalId}`;
@@ -305,13 +264,9 @@ export class DatabricksPermissionService {
 					scopes: [],
 				});
 			}
-			// Convert legacy scope to new format
-			const convertedScopes = this.convertLegacyScope(securableType, perm.permission);
 			const group = groupMap.get(key)!;
-			for (const scope of convertedScopes) {
-				if (!group.scopes.includes(scope)) {
-					group.scopes.push(scope);
-				}
+			if (!group.scopes.includes(perm.permission)) {
+				group.scopes.push(perm.permission);
 			}
 		}
 
@@ -321,7 +276,6 @@ export class DatabricksPermissionService {
 	/**
 	 * Get all scopes a user has on a securable via Databricks permissions.
 	 * Checks user ID and group memberships.
-	 * Legacy permissions (READ, USE, WRITE) are converted to new scope format.
 	 */
 	async getScopes(
 		securableType: DatabricksSecurableType,
@@ -347,11 +301,7 @@ export class DatabricksPermissionService {
 				(perm.principalType === 'servicePrincipal' && perm.principalId === identity.userId);
 
 			if (matches) {
-				// Convert legacy scope to new format
-				const convertedScopes = this.convertLegacyScope(securableType, perm.permission);
-				for (const scope of convertedScopes) {
-					scopes.add(scope);
-				}
+				scopes.add(perm.permission);
 			}
 		}
 
@@ -475,6 +425,15 @@ export class DatabricksPermissionService {
 			);
 		}
 
+		this.logger.info('[Databricks RBAC] Granted scopes', {
+			action: 'grant',
+			securableType,
+			securableId,
+			principalType,
+			principalId,
+			grantedScopes: scopes,
+		});
+
 		return await this.getPermissionGroups(securableType, securableId);
 	}
 
@@ -514,6 +473,15 @@ export class DatabricksPermissionService {
 			);
 		}
 
+		this.logger.info('[Databricks RBAC] Set scopes', {
+			action: 'set',
+			securableType,
+			securableId,
+			principalType,
+			principalId,
+			newScopes: scopes,
+		});
+
 		return await this.getPermissionGroups(securableType, securableId);
 	}
 
@@ -537,6 +505,15 @@ export class DatabricksPermissionService {
 			);
 		}
 
+		this.logger.info('[Databricks RBAC] Revoked scopes', {
+			action: 'revoke',
+			securableType,
+			securableId,
+			principalType,
+			principalId,
+			revokedScopes: scopes,
+		});
+
 		return await this.getPermissionGroups(securableType, securableId);
 	}
 
@@ -556,13 +533,20 @@ export class DatabricksPermissionService {
 			principalId,
 		);
 
+		this.logger.info('[Databricks RBAC] Revoked all scopes', {
+			action: 'revokeAll',
+			securableType,
+			securableId,
+			principalType,
+			principalId,
+		});
+
 		return await this.getPermissionGroups(securableType, securableId);
 	}
 
 	/**
 	 * Get all securable IDs that the user has access to via Databricks permissions.
 	 * Returns IDs where the user has any scope (or optionally a specific required scope).
-	 * Legacy permissions (READ, USE, WRITE) are converted when checking required scope.
 	 */
 	async getAccessibleSecurableIds(
 		securableType: DatabricksSecurableType,
@@ -584,11 +568,8 @@ export class DatabricksPermissionService {
 			const accessibleIds = new Set<string>();
 
 			for (const perm of allPermissions) {
-				// Convert legacy scope to new format for comparison
-				const convertedScopes = this.convertLegacyScope(securableType, perm.permission);
-
-				// Skip if a specific scope is required and not in converted scopes
-				if (requiredScope && !convertedScopes.includes(requiredScope)) {
+				// Skip if a specific scope is required and doesn't match
+				if (requiredScope && perm.permission !== requiredScope) {
 					continue;
 				}
 
@@ -621,33 +602,6 @@ export class DatabricksPermissionService {
 		} else {
 			this.identityCache.clear();
 		}
-	}
-
-	// ============================================================
-	// DEPRECATED: Legacy methods for backwards compatibility
-	// These will be removed in a future version
-	// ============================================================
-
-	/** @deprecated Use hasScope() instead */
-	async hasPermission(
-		securableType: DatabricksSecurableType,
-		securableId: string,
-		_user: User,
-		requiredScope: string,
-		databricksToken?: string,
-	): Promise<boolean> {
-		return await this.hasScope(securableType, securableId, requiredScope, databricksToken);
-	}
-
-	/** @deprecated Use getScopes() instead */
-	async getHighestPermission(
-		securableType: DatabricksSecurableType,
-		securableId: string,
-		_user: User,
-		databricksToken?: string,
-	): Promise<string | null> {
-		const scopes = await this.getScopes(securableType, securableId, databricksToken);
-		return scopes.length > 0 ? scopes[0] : null;
 	}
 }
 

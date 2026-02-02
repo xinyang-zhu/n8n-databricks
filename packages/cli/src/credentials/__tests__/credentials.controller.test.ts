@@ -31,6 +31,7 @@ describe('CredentialsController', () => {
 		mock(),
 		eventService,
 		credentialsFinderService,
+		mock(),
 	);
 
 	let req: AuthenticatedRequest;
