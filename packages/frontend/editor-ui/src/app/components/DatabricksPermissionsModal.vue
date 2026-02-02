@@ -59,6 +59,34 @@ interface PrincipalOption {
 }
 
 /**
+ * Scope descriptions for the dropdown
+ */
+const scopeDescriptions: Record<string, string> = {
+	// Workflow scopes
+	'workflow:read': 'View workflow details and configuration',
+	'workflow:update': 'Edit workflow nodes and settings',
+	'workflow:delete': 'Permanently remove this workflow',
+	'workflow:execute': 'Run this workflow manually or via trigger',
+	'workflow:share': 'Manage who can access this workflow',
+	'workflow:move': 'Move workflow to a different project',
+	'workflow:activate': 'Enable workflow triggers',
+	'workflow:deactivate': 'Disable workflow triggers',
+	'workflow:publish': 'Publish workflow changes',
+	// Credential scopes
+	'credential:read': 'View credential details',
+	'credential:update': 'Edit credential settings',
+	'credential:delete': 'Permanently remove this credential',
+	'credential:share': 'Manage who can access this credential',
+	'credential:move': 'Move credential to a different project',
+	// Data table scopes
+	'dataTable:read': 'View data table schema and settings',
+	'dataTable:update': 'Edit data table schema',
+	'dataTable:delete': 'Permanently remove this data table',
+	'dataTable:readRow': 'Read rows from this data table',
+	'dataTable:writeRow': 'Add, update, or delete rows',
+};
+
+/**
  * Get human-readable label for a scope
  */
 const getScopeLabel = (scope: string): string => {
@@ -70,10 +98,18 @@ const getScopeLabel = (scope: string): string => {
 	return scope;
 };
 
+/**
+ * Get description for a scope
+ */
+const getScopeDescription = (scope: string): string => {
+	return scopeDescriptions[scope] || '';
+};
+
 const scopeOptions = computed(() => {
 	return availableScopes.value.map((scope) => ({
 		value: scope,
 		label: getScopeLabel(scope),
+		description: getScopeDescription(scope),
 	}));
 });
 
@@ -95,10 +131,10 @@ const principalOptions = computed((): PrincipalOption[] => {
 			icon: 'users' as const,
 		}));
 	const servicePrincipals = availableServicePrincipals.value
-		.filter((sp) => sp.id && sp.displayName)
+		.filter((sp) => sp.id && (sp.displayName || sp.applicationId))
 		.map((sp) => ({
 			value: `servicePrincipal:${sp.id}`,
-			label: `${sp.displayName}`,
+			label: `${sp.displayName || sp.applicationId} (${sp.applicationId})`,
 			type: 'servicePrincipal' as const,
 			icon: 'robot' as const,
 		}));
@@ -330,7 +366,10 @@ const getPrincipalDisplayName = (
 		return group?.displayName || principalId;
 	} else {
 		const sp = availableServicePrincipals.value.find((s) => s.id === principalId);
-		return sp?.displayName || principalId;
+		if (sp) {
+			return `${sp.displayName || sp.applicationId} (${sp.applicationId})`;
+		}
+		return principalId;
 	}
 };
 
@@ -423,7 +462,14 @@ onMounted(async () => {
 										:key="opt.value"
 										:value="opt.value"
 										:label="opt.label"
-									/>
+									>
+										<div :class="$style.scopeOptionContent">
+											<span :class="$style.scopeOptionLabel">{{ opt.label }}</span>
+											<span v-if="opt.description" :class="$style.scopeOptionDescription">{{
+												opt.description
+											}}</span>
+										</div>
+									</N8nOption>
 								</N8nSelect>
 								<div v-else :class="$style.scopeBadges">
 									<span v-for="scope in group.scopes" :key="scope" :class="$style.scopeBadge">
@@ -480,7 +526,14 @@ onMounted(async () => {
 										:key="opt.value"
 										:value="opt.value"
 										:label="opt.label"
-									/>
+									>
+										<div :class="$style.scopeOptionContent">
+											<span :class="$style.scopeOptionLabel">{{ opt.label }}</span>
+											<span v-if="opt.description" :class="$style.scopeOptionDescription">{{
+												opt.description
+											}}</span>
+										</div>
+									</N8nOption>
 								</N8nSelect>
 							</div>
 							<div :class="$style.actionColumn">
@@ -506,15 +559,25 @@ onMounted(async () => {
 
 		<template #footer>
 			<div :class="$style.footer">
-				<N8nButton type="secondary" :disabled="isSaving" @click="cancel">Cancel</N8nButton>
-				<N8nButton
-					type="primary"
-					:disabled="isSaving || !hasChanges"
-					:loading="isSaving"
-					@click="save"
-				>
-					Save
-				</N8nButton>
+				<div :class="$style.footerNote">
+					<N8nIcon icon="info-circle" :class="$style.footerNoteIcon" />
+					<span>
+						Databricks permissions are managed independently from n8n permissions. Users with access
+						granted through n8n will retain their permissions regardless of the settings configured
+						here, and vice versa.
+					</span>
+				</div>
+				<div :class="$style.footerActions">
+					<N8nButton type="secondary" :disabled="isSaving" @click="cancel">Cancel</N8nButton>
+					<N8nButton
+						type="primary"
+						:disabled="isSaving || !hasChanges"
+						:loading="isSaving"
+						@click="save"
+					>
+						Save
+					</N8nButton>
+				</div>
 			</div>
 		</template>
 	</Modal>
@@ -611,12 +674,12 @@ onMounted(async () => {
 .row {
 	display: flex;
 	align-items: center;
-	padding: var(--spacing--xs) var(--spacing--xs);
+	padding: var(--spacing--xs) 0;
 	border-radius: var(--radius);
-	background: var(--color--background--light-2);
+	background: transparent;
 
 	&:hover {
-		background: var(--color--background--light-3);
+		background: var(--color--background--light-2);
 	}
 }
 
@@ -703,6 +766,24 @@ onMounted(async () => {
 	color: var(--color--text--tint-1);
 }
 
+.scopeOptionContent {
+	display: flex;
+	flex-direction: column;
+	gap: var(--spacing--5xs);
+	padding: var(--spacing--4xs) 0;
+}
+
+.scopeOptionLabel {
+	font-size: var(--font-size--sm);
+	color: var(--color--text);
+}
+
+.scopeOptionDescription {
+	font-size: var(--font-size--2xs);
+	color: var(--color--text--tint-1);
+	line-height: var(--line-height--md);
+}
+
 .emptyState {
 	padding: var(--spacing--xl);
 	text-align: center;
@@ -712,9 +793,29 @@ onMounted(async () => {
 
 .footer {
 	display: flex;
+	flex-direction: column;
+	gap: var(--spacing--sm);
+	padding-top: var(--spacing--md);
+	border-top: 1px solid var(--color--foreground);
+}
+
+.footerNote {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--spacing--xs);
+	font-size: var(--font-size--2xs);
+	color: var(--color--text--tint-1);
+	line-height: var(--line-height--xl);
+}
+
+.footerNoteIcon {
+	flex-shrink: 0;
+	margin-top: 2px;
+}
+
+.footerActions {
+	display: flex;
 	justify-content: flex-end;
 	gap: var(--spacing--sm);
-	padding: var(--spacing--md) var(--spacing--xl);
-	border-top: 1px solid var(--color--foreground);
 }
 </style>

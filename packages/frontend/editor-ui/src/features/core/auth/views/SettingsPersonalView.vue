@@ -91,18 +91,17 @@ const currentUser = computed((): IUser | null => {
 	return usersStore.currentUser;
 });
 
+const isDatabricksUser = computed((): boolean => {
+	return currentUser.value?.signInType === 'databricks';
+});
+
 const isExternalAuthEnabled = computed((): boolean => {
 	const isLdapEnabled =
 		ssoStore.isEnterpriseLdapEnabled && currentUser.value?.signInType === 'ldap';
 	const isSamlEnabled = ssoStore.isSamlLoginEnabled && ssoStore.isDefaultAuthenticationSaml;
 	const isOidcEnabled =
 		ssoStore.isEnterpriseOidcEnabled && currentUser.value?.signInType === 'oidc';
-	// Databricks auth is external when it's enabled and email login is disabled
-	const isDatabricksAuthOnly =
-		(settingsStore.databricksSettings.federatedLoginEnabled ||
-			settingsStore.databricksSettings.tokenLoginEnabled) &&
-		!settingsStore.authMethodsSettings.emailEnabled;
-	return isLdapEnabled || isSamlEnabled || isOidcEnabled || isDatabricksAuthOnly;
+	return isLdapEnabled || isSamlEnabled || isOidcEnabled || isDatabricksUser.value;
 });
 
 const isPersonalSecurityEnabled = computed((): boolean => {
@@ -373,6 +372,9 @@ onBeforeUnmount(() => {
 					i18n.baseText('settings.personal.basicInformation')
 				}}</N8nHeading>
 			</div>
+			<N8nNotice v-if="isDatabricksUser" :class="$style.databricksNotice">
+				Your profile information is managed by Databricks and cannot be changed here.
+			</N8nNotice>
 			<div data-test-id="personal-data-form">
 				<N8nFormInputs
 					v-if="formInputs"
@@ -384,7 +386,7 @@ onBeforeUnmount(() => {
 				/>
 			</div>
 		</div>
-		<div v-if="isPersonalSecurityEnabled">
+		<div v-if="isPersonalSecurityEnabled && !isDatabricksUser">
 			<div class="mb-s">
 				<N8nHeading size="large">{{ i18n.baseText('settings.personal.security') }}</N8nHeading>
 			</div>
@@ -534,5 +536,9 @@ onBeforeUnmount(() => {
 
 .themeSelect {
 	max-width: 50%;
+}
+
+.databricksNotice {
+	margin-bottom: var(--spacing--sm);
 }
 </style>

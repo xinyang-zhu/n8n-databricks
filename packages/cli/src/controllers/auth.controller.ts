@@ -3,7 +3,13 @@ import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
 import { Time } from '@n8n/constants';
 import type { User, PublicUser } from '@n8n/db';
-import { UserRepository, AuthenticatedRequest, GLOBAL_OWNER_ROLE } from '@n8n/db';
+import {
+	UserRepository,
+	AuthenticatedRequest,
+	GLOBAL_OWNER_ROLE,
+	AuthIdentityRepository,
+	AuthIdentity,
+} from '@n8n/db';
 import {
 	Body,
 	createBodyKeyedRateLimiter,
@@ -48,6 +54,7 @@ export class AuthController {
 		private readonly userService: UserService,
 		private readonly license: License,
 		private readonly userRepository: UserRepository,
+		private readonly authIdentityRepository: AuthIdentityRepository,
 		private readonly eventService: EventService,
 		private readonly passwordUtility: PasswordUtility,
 		private readonly databricksPermissionService: DatabricksPermissionService,
@@ -132,6 +139,9 @@ export class AuthController {
 
 				// Store Databricks token server-side for SCIM API calls
 				this.databricksPermissionService.setUserToken(user.id, databricksToken);
+
+				// Create or update auth identity for Databricks
+				await this.ensureDatabricksAuthIdentity(user, databricksUser.id);
 
 				this.eventService.emit('user-logged-in', {
 					user,
@@ -284,6 +294,9 @@ export class AuthController {
 			});
 			this.databricksPermissionService.setUserToken(user.id, token);
 
+			// Create or update auth identity for Databricks
+			await this.ensureDatabricksAuthIdentity(user, databricksUser.id);
+
 			this.eventService.emit('user-logged-in', {
 				user,
 				authenticationMethod: 'databricks',
@@ -392,5 +405,21 @@ export class AuthController {
 		await this.authService.invalidateToken(req);
 		this.authService.clearCookie(res);
 		return { loggedOut: true };
+	}
+
+	/**
+	 * Creates or updates an auth identity for a Databricks user.
+	 * This marks the user as having logged in via Databricks, which prevents
+	 * them from changing their profile info (managed by Databricks).
+	 */
+	private async ensureDatabricksAuthIdentity(user: User, databricksUserId: string): Promise<void> {
+		const existingIdentity = await this.authIdentityRepository.findOne({
+			where: { userId: user.id, providerType: 'databricks' },
+		});
+
+		if (!existingIdentity) {
+			const identity = AuthIdentity.create(user, databricksUserId, 'databricks');
+			await this.authIdentityRepository.save(identity);
+		}
 	}
 }

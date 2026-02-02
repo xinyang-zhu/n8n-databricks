@@ -14,7 +14,6 @@ import { AuthError } from '@/errors/response-errors/auth.error';
 import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
 import { License } from '@/license';
 import { MfaService } from '@/mfa/mfa.service';
-import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 import { JwtService } from '@/services/jwt.service';
 import { PasswordUtility } from '@/services/password.utility';
 import { UrlService } from '@/services/url.service';
@@ -71,7 +70,6 @@ export class AuthService {
 		private readonly invalidAuthTokenRepository: InvalidAuthTokenRepository,
 		private readonly mfaService: MfaService,
 		private readonly passwordUtility: PasswordUtility,
-		private readonly databricksPermissionService: DatabricksPermissionService,
 	) {
 		const restEndpoint = globalConfig.endpoints.rest;
 		this.skipBrowserIdCheckEndpoints = [
@@ -151,21 +149,9 @@ export class AuthService {
 				}
 			}
 
-			// If no JWT cookie auth, try Databricks token from forwarded headers
-			if (!req.user) {
-				const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
-				if (databricksToken) {
-					try {
-						const user = await this.authenticateWithDatabricksToken(databricksToken);
-						req.user = user;
-						req.authInfo = { usedMfa: false };
-					} catch (error) {
-						this.logger.debug('Databricks token authentication failed', {
-							error: error instanceof Error ? error.message : error,
-						});
-					}
-				}
-			}
+			// NOTE: Databricks federated login via x-forwarded-access-token is NOT done
+			// automatically here. Users must explicitly click "Sign in with Databricks"
+			// which calls /login/databricks-federated. This prevents auto-login after logout.
 
 			const isPreviewMode = process.env.N8N_PREVIEW_MODE === 'true';
 			const shouldSkipAuth = (allowSkipPreviewAuth && isPreviewMode) || allowUnauthenticated;
@@ -174,40 +160,6 @@ export class AuthService {
 			else if (shouldSkipAuth) next();
 			else res.status(401).json({ status: 'error', message: 'Unauthorized' });
 		};
-	}
-
-	/**
-	 * Authenticate a user using a Databricks personal access token.
-	 * Validates the token against Databricks SCIM API and auto-provisions users if needed.
-	 */
-	private async authenticateWithDatabricksToken(token: string): Promise<User> {
-		const databricksUser = await this.databricksPermissionService.fetchCurrentUser(token);
-		const primaryEmail = databricksUser.emails?.find((e) => e.primary)?.value;
-
-		if (!primaryEmail) {
-			throw new AuthError('Could not retrieve email from Databricks profile');
-		}
-
-		let user = await this.userRepository.findOne({
-			where: { email: primaryEmail },
-			relations: ['role'],
-		});
-
-		if (!user) {
-			// Auto-provision user with personal project
-			const randomPassword = await this.passwordUtility.hash(Math.random().toString(36).slice(-16));
-			const result = await this.userRepository.createUserWithProject({
-				email: primaryEmail,
-				firstName: databricksUser.displayName?.split(' ')[0] ?? '',
-				lastName: databricksUser.displayName?.split(' ').slice(1).join(' ') ?? '',
-				password: randomPassword,
-				role: { slug: 'global:member' },
-			});
-			user = result.user;
-			this.logger.info('Auto-provisioned user from Databricks', { email: primaryEmail });
-		}
-
-		return user;
 	}
 
 	getCookieToken(req: AuthenticatedRequest) {
