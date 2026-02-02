@@ -573,7 +573,10 @@ export class DatabricksPermissionsController {
 				servicePrincipals: response.data.Resources.map((sp) => ({
 					id: sp.id, // Databricks SCIM service principal ID for permission assignment
 					applicationId: sp.applicationId,
-					displayName: sp.displayName || sp.applicationId,
+					// Format: "{displayName} ({applicationId})" per spec
+					displayName: sp.displayName
+						? `${sp.displayName} (${sp.applicationId})`
+						: sp.applicationId,
 				})),
 				totalResults: response.data.totalResults,
 			};

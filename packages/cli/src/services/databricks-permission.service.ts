@@ -15,6 +15,8 @@ import axios from 'axios';
 export class DatabricksPermissionService {
 	// Cache identity by token - if token changes, cache miss, fresh fetch
 	private identityCache = new Map<string, { identity: DatabricksIdentity; expiresAt: number }>();
+	// Cache principal info (id => displayName) for UI display
+	private principalCache = new Map<string, { id: string; displayName: string; type: string }>();
 	// Cache for service principal token (used for listing users/groups/service-principals)
 	private serviceTokenCache: { token: string; expiresAt: number } | null = null;
 	private readonly IDENTITY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -136,22 +138,33 @@ export class DatabricksPermissionService {
 	 * Extract Databricks token from request.
 	 *
 	 * Checks in order:
-	 * 1. x-databricks-token header (explicit token)
-	 * 2. x-forwarded-access-token header (from reverse proxy with OAuth2)
-	 * 3. x-forwarded-token header (alternative reverse proxy header)
-	 * 4. databricks_token cookie (set during login with token)
+	 * 1. databricks_token cookie (user logged in via UI with token)
+	 * 2. x-forwarded-access-token header (UI via reverse proxy)
+	 * 3. x-forwarded-token header (API via reverse proxy)
 	 */
 	getTokenFromRequest(req: {
 		headers: Record<string, unknown>;
 		cookies?: Record<string, string | undefined>;
 	}): string | undefined {
-		const headerToken = req.headers['x-databricks-token'] as string | undefined;
-		const forwardedToken =
-			(req.headers['x-forwarded-access-token'] as string | undefined) ||
-			(req.headers['x-forwarded-token'] as string | undefined);
 		const cookieToken = req.cookies?.databricks_token;
+		const forwardedAccessToken = req.headers['x-forwarded-access-token'] as string | undefined;
+		const forwardedToken = req.headers['x-forwarded-token'] as string | undefined;
 
-		return headerToken || forwardedToken || cookieToken;
+		// Cookie takes precedence - it represents user's explicit login choice
+		return cookieToken || forwardedAccessToken || forwardedToken;
+	}
+
+	/**
+	 * Get the source of the Databricks token (for logging/debugging).
+	 */
+	getTokenSourceFromRequest(req: {
+		headers: Record<string, unknown>;
+		cookies?: Record<string, string | undefined>;
+	}): 'cookie' | 'x-forwarded-access-token' | 'x-forwarded-token' | 'none' {
+		if (req.cookies?.databricks_token) return 'cookie';
+		if (req.headers['x-forwarded-access-token']) return 'x-forwarded-access-token';
+		if (req.headers['x-forwarded-token']) return 'x-forwarded-token';
+		return 'none';
 	}
 
 	/**
@@ -170,7 +183,7 @@ export class DatabricksPermissionService {
 
 	/**
 	 * Get all permission groups for a securable resource.
-	 * Returns principals with their granted scopes.
+	 * Returns principals with their granted scopes and display names from cache.
 	 */
 	async getPermissionGroups(
 		securableType: DatabricksSecurableType,
@@ -183,10 +196,13 @@ export class DatabricksPermissionService {
 		for (const perm of permissions) {
 			const key = `${perm.principalType}:${perm.principalId}`;
 			if (!groupMap.has(key)) {
+				// Look up display name from cache
+				const cachedPrincipal = this.principalCache.get(perm.principalId);
 				groupMap.set(key, {
 					principal: {
 						type: perm.principalType as 'user' | 'group' | 'servicePrincipal',
 						id: perm.principalId,
+						displayName: cachedPrincipal?.displayName,
 					},
 					scopes: [],
 				});
@@ -286,10 +302,18 @@ export class DatabricksPermissionService {
 	 * Get Databricks identity (user ID and group IDs) from token.
 	 * Cached by token - different token = fresh fetch.
 	 */
-	async getDatabricksIdentity(databricksToken: string): Promise<DatabricksIdentity> {
+	async getDatabricksIdentity(
+		databricksToken: string,
+		tokenSource?: 'cookie' | 'header' | 'none',
+	): Promise<DatabricksIdentity> {
+		const sourceInfo = tokenSource ? `, source=${tokenSource}` : '';
+
 		// Check cache - keyed by token, so different token = cache miss
 		const cached = this.identityCache.get(databricksToken);
 		if (cached && cached.expiresAt > Date.now()) {
+			this.logger.info(
+				`[Databricks RBAC] Identified principal (cached): id=${cached.identity.userId}, groups=${cached.identity.groupIds.length}${sourceInfo}`,
+			);
 			return cached.identity;
 		}
 
@@ -298,17 +322,25 @@ export class DatabricksPermissionService {
 
 			const identity: DatabricksIdentity = {
 				userId: userData.id,
+				displayName: userData.displayName,
 				groupIds: userData.groups?.map((g) => g.value) ?? [],
 			};
 
 			this.logger.info(
-				`[Databricks RBAC] Identified principal: id=${userData.id}, userName=${userData.userName}, displayName=${userData.displayName}, groups=${identity.groupIds.length}`,
+				`[Databricks RBAC] Identified principal: id=${userData.id}, userName=${userData.userName}, displayName=${userData.displayName}, groups=${identity.groupIds.length}${sourceInfo}`,
 			);
 
 			// Cache by token
 			this.identityCache.set(databricksToken, {
 				identity,
 				expiresAt: Date.now() + this.IDENTITY_CACHE_TTL_MS,
+			});
+
+			// Cache principal info for display name lookup
+			this.principalCache.set(userData.id, {
+				id: userData.id,
+				displayName: userData.displayName ?? userData.userName,
+				type: 'user',
 			});
 
 			return identity;
@@ -337,12 +369,22 @@ export class DatabricksPermissionService {
 		principalType: 'user' | 'group' | 'servicePrincipal',
 		principalId: string,
 		scopes: string[],
+		principalDisplayName?: string,
 	): Promise<DatabricksPermissionGroup[]> {
 		// Validate all scopes
 		for (const scope of scopes) {
 			if (!this.isValidScope(securableType, scope)) {
 				throw new Error(`Scope '${scope}' is not valid for securable type '${securableType}'`);
 			}
+		}
+
+		// Cache the display name if provided
+		if (principalDisplayName) {
+			this.principalCache.set(principalId, {
+				id: principalId,
+				displayName: principalDisplayName,
+				type: principalType,
+			});
 		}
 
 		// Insert each scope as a separate row
@@ -357,7 +399,7 @@ export class DatabricksPermissionService {
 		}
 
 		this.logger.info(
-			`[Databricks RBAC] Granted scopes: ${securableType}/${securableId} -> ${principalType}:${principalId} = [${scopes.join(', ')}]`,
+			`[Databricks RBAC] Granted scopes: ${securableType}/${securableId} -> ${principalType}:${principalId} (${principalDisplayName ?? 'unknown'}) = [${scopes.join(', ')}]`,
 		);
 
 		return await this.getPermissionGroups(securableType, securableId);
@@ -522,6 +564,7 @@ export class DatabricksPermissionService {
 
 export interface DatabricksIdentity {
 	userId: string;
+	displayName?: string;
 	groupIds: string[];
 }
 

@@ -121,7 +121,7 @@ const principalOptions = computed((): PrincipalOption[] => {
 		.filter((u) => u.id && (u.displayName || u.email))
 		.map((u) => ({
 			value: `user:${u.id}`,
-			label: `${u.displayName || u.email}`,
+			label: u.displayName || u.email,
 			type: 'user' as const,
 			icon: 'user' as const,
 		}));
@@ -129,15 +129,16 @@ const principalOptions = computed((): PrincipalOption[] => {
 		.filter((g) => g.id && g.displayName)
 		.map((g) => ({
 			value: `group:${g.id}`,
-			label: `${g.displayName}`,
+			label: g.displayName,
 			type: 'group' as const,
 			icon: 'users' as const,
 		}));
+	// Backend returns displayName in format "{displayName} ({applicationId})"
 	const servicePrincipals = availableServicePrincipals.value
 		.filter((sp) => sp.id && (sp.displayName || sp.applicationId))
 		.map((sp) => ({
 			value: `servicePrincipal:${sp.id}`,
-			label: `${sp.displayName || sp.applicationId} (${sp.applicationId})`,
+			label: sp.displayName || sp.applicationId,
 			type: 'servicePrincipal' as const,
 			icon: 'robot' as const,
 		}));
@@ -165,65 +166,32 @@ const displayedGroups = computed(() => {
 const initialize = async () => {
 	isLoading.value = true;
 	try {
-		const [
-			permResponse,
-			usersResponse,
-			groupsResponse,
-			servicePrincipalsResponse,
-			currentUserResponse,
-		] = await Promise.all([
-			databricksApi.getSecurablePermissions(
-				rootStore.restApiContext,
-				props.data.securableType,
-				props.data.securableId,
-			),
-			databricksApi
-				.getDatabricksUsers(rootStore.restApiContext)
-				.catch(() => ({ users: [], totalResults: 0 })),
-			databricksApi
-				.getDatabricksGroups(rootStore.restApiContext)
-				.catch(() => ({ groups: [], totalResults: 0 })),
-			databricksApi
-				.getDatabricksServicePrincipals(rootStore.restApiContext)
-				.catch(() => ({ servicePrincipals: [], totalResults: 0 })),
-			databricksApi.getDatabricksCurrentUser(rootStore.restApiContext).catch(() => null),
-		]);
+		// Fetch permissions, current user, and all principals from Databricks SCIM API
+		const [permResponse, currentUserResponse, usersResponse, groupsResponse, spResponse] =
+			await Promise.all([
+				databricksApi.getSecurablePermissions(
+					rootStore.restApiContext,
+					props.data.securableType,
+					props.data.securableId,
+				),
+				databricksApi.getDatabricksCurrentUser(rootStore.restApiContext).catch(() => null),
+				databricksApi.getDatabricksUsers(rootStore.restApiContext).catch(() => null),
+				databricksApi.getDatabricksGroups(rootStore.restApiContext).catch(() => null),
+				databricksApi.getDatabricksServicePrincipals(rootStore.restApiContext).catch(() => null),
+			]);
+
 		permissionGroups.value = permResponse.permissionGroups;
 		// Create a deep copy for local editing
 		localPermissionGroups.value = deepCopy(permResponse.permissionGroups);
 		currentUserScopes.value = permResponse.currentUserScopes;
 		availableScopes.value = permResponse.availableScopes;
 		canManage.value = permResponse.canManage;
-		availableUsers.value = usersResponse.users;
-		availableGroups.value = groupsResponse.groups;
-		availableServicePrincipals.value = servicePrincipalsResponse.servicePrincipals;
 		currentDatabricksUser.value = currentUserResponse;
 
-		// Ensure current user is in BOTH lists for display name resolution
-		// (permissions may be stored with either principalType, regardless of actual type)
-		if (currentUserResponse) {
-			// Add to users list if not present
-			const existsInUsers = availableUsers.value.some((u) => u.id === currentUserResponse.id);
-			if (!existsInUsers) {
-				availableUsers.value.push({
-					id: currentUserResponse.id,
-					email: currentUserResponse.userName,
-					displayName: currentUserResponse.displayName || currentUserResponse.userName,
-				});
-			}
-
-			// Add to service principals list if not present
-			const existsInSPs = availableServicePrincipals.value.some(
-				(sp) => sp.id === currentUserResponse.id,
-			);
-			if (!existsInSPs) {
-				availableServicePrincipals.value.push({
-					id: currentUserResponse.id,
-					applicationId: currentUserResponse.userName,
-					displayName: currentUserResponse.displayName || currentUserResponse.userName,
-				});
-			}
-		}
+		// Use all principals from Databricks SCIM API for the dropdown
+		availableUsers.value = usersResponse?.users ?? [];
+		availableGroups.value = groupsResponse?.groups ?? [];
+		availableServicePrincipals.value = spResponse?.servicePrincipals ?? [];
 
 		// Reset change tracking
 		hasChanges.value = false;
@@ -407,6 +375,16 @@ const getPrincipalDisplayName = (
 	principalType: 'user' | 'group' | 'servicePrincipal',
 	principalId: string,
 ): string => {
+	// First check if we have the display name in the permission groups directly
+	const allGroups = [...localPermissionGroups.value, ...pendingAdditions.value];
+	const permGroup = allGroups.find(
+		(g) => g.principal.type === principalType && g.principal.id === principalId,
+	);
+	if (permGroup?.principal.displayName) {
+		return permGroup.principal.displayName;
+	}
+
+	// Fallback to lookup lists
 	if (principalType === 'user') {
 		const user = availableUsers.value.find((u) => u.id === principalId);
 		return user?.displayName || user?.email || principalId;
@@ -416,7 +394,7 @@ const getPrincipalDisplayName = (
 	} else {
 		const sp = availableServicePrincipals.value.find((s) => s.id === principalId);
 		if (sp) {
-			return `${sp.displayName || sp.applicationId} (${sp.applicationId})`;
+			return sp.displayName || sp.applicationId || principalId;
 		}
 		return principalId;
 	}

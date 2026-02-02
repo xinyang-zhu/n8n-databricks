@@ -368,47 +368,35 @@ independently of n8n's native permissions.
 - If Databricks grants USE and n8n grants nothing → allowed
 - If n8n grants workflow:execute and Databricks grants nothing → allowed
 
-**Correct pattern** (without @ProjectScope decorator):
+**Implementation**: The MERGE logic is implemented in `controller.registry.ts` in the
+`createScopedMiddleware` method. The `@ProjectScope` decorator automatically checks
+both n8n and Databricks permissions and allows access if EITHER grants it.
+
+```typescript
+// In controller.registry.ts - createScopedMiddleware()
+// Check n8n permissions
+const hasN8nAccess = await userHasScopes(req.user, [scope], globalOnly, req.params);
+
+// Check Databricks permissions if RBAC is enabled
+let hasDatabricksAccess = false;
+if (this.globalConfig.databricks.rbacEnabled) {
+    // ... check Databricks scope
+}
+
+// Permission = MERGE(DBX, N8N) - allow if EITHER grants access
+if (!hasN8nAccess && !hasDatabricksAccess) {
+    res.status(403).json({ status: 'error', message: RESPONSE_ERROR_MESSAGES.MISSING_SCOPE });
+    return;
+}
+```
+
+**Usage**: Just use `@ProjectScope` decorator as normal - the MERGE logic is automatic:
 ```typescript
 @Get('/:workflowId')
+@ProjectScope('workflow:read')  // ✅ Automatically checks both DBX and N8N
 async getWorkflow(req: WorkflowRequest.Get) {
-    const { workflowId } = req.params;
-
-    // Check BOTH permission systems
-    const hasDatabricksAccess = this.globalConfig.databricks.rbacEnabled &&
-        (await this.hasDatabricksPermission(req, workflowId, 'READ'));
-    const hasN8nAccess = await userHasScopes(req.user, ['workflow:read'], false, { workflowId });
-
-    // Allow if EITHER grants access
-    if (!hasDatabricksAccess && !hasN8nAccess) {
-        throw new ForbiddenError('...');
-    }
-    // ... rest of method
+    // Method only reached if EITHER DBX or N8N grants access
 }
-```
-
-**Incorrect pattern** (DO NOT USE):
-```typescript
-@ProjectScope('workflow:read')  // ❌ Runs BEFORE method body, blocks Databricks check
-async getWorkflow(req: WorkflowRequest.Get) {
-    await this.checkDatabricksPermission(req, workflowId, 'READ');  // ❌ Never reached if n8n denies
-}
-```
-
-### Endpoints Status
-
-| Endpoint | Correct MERGE(DBX,N8N)? | Notes |
-|----------|----------------------|-------|
-| GET /:workflowId | ✅ Fixed | |
-| POST /:workflowId/run | ✅ Fixed | |
-| PATCH /:workflowId | ❌ Uses @ProjectScope | Needs fix |
-| DELETE /:workflowId | ❌ Uses @ProjectScope | Needs fix |
-| POST /:workflowId/activate | ❌ Uses @ProjectScope | Needs fix |
-| POST /:workflowId/deactivate | ❌ Uses @ProjectScope | Needs fix |
-| POST /:workflowId/archive | ❌ Uses @ProjectScope | Needs fix |
-| POST /:workflowId/unarchive | ❌ Uses @ProjectScope | Needs fix |
-| PUT /:workflowId/share | ❌ Uses @ProjectScope | Needs fix |
-| PUT /:workflowId/transfer | ❌ Uses @ProjectScope | Needs fix |
 
 ### Important Notes
 

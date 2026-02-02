@@ -2942,6 +2942,7 @@ export const DATABRICKS_SECURABLE_LABELS: Record<DatabricksSecurableType, string
 export interface DatabricksPrincipal {
 	type: 'user' | 'group' | 'servicePrincipal';
 	id: string; // Databricks user ID, group ID, or service principal ID
+	displayName?: string; // Cached display name for UI
 }
 
 export interface DatabricksPermissionGroup {
