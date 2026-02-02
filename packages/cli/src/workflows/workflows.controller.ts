@@ -264,15 +264,15 @@ export class WorkflowsController {
 			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 			if (databricksToken) {
 				try {
-					const creatorDatabricksId =
-						await this.databricksPermissionService.getCurrentUserDatabricksId(databricksToken);
+					const creatorIdentity =
+						await this.databricksPermissionService.getDatabricksIdentity(databricksToken);
 					// Grant all workflow scopes to the creator
 					const allWorkflowScopes = this.databricksPermissionService.getAvailableScopes('workflow');
 					await this.databricksPermissionService.grantScopes(
 						'workflow',
 						savedWorkflow.id,
 						'user',
-						creatorDatabricksId,
+						creatorIdentity.userId,
 						[...allWorkflowScopes],
 					);
 				} catch (error) {

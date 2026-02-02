@@ -13,13 +13,11 @@ import axios from 'axios';
  */
 @Service()
 export class DatabricksPermissionService {
+	// Cache identity by token - if token changes, cache miss, fresh fetch
 	private identityCache = new Map<string, { identity: DatabricksIdentity; expiresAt: number }>();
-	// Store Databricks tokens by n8n user ID (set during login, used for SCIM API calls)
-	private userTokenCache = new Map<string, { token: string; expiresAt: number }>();
 	// Cache for service principal token (used for listing users/groups/service-principals)
 	private serviceTokenCache: { token: string; expiresAt: number } | null = null;
-	private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-	private readonly TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours (match cookie TTL)
+	private readonly IDENTITY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 	constructor(
 		private readonly logger: Logger,
@@ -135,96 +133,21 @@ export class DatabricksPermissionService {
 	// ============================================================
 
 	/**
-	 * Store a user's Databricks token (called during login)
-	 */
-	setUserToken(userId: string, token: string): void {
-		this.logger.debug('[DBX-TOKEN] Storing token for user', {
-			userId,
-			tokenLength: token.length,
-			tokenPrefix: token.substring(0, 10) + '...',
-		});
-		this.userTokenCache.set(userId, {
-			token,
-			expiresAt: Date.now() + this.TOKEN_TTL_MS,
-		});
-	}
-
-	/**
-	 * Get a user's stored Databricks token
-	 */
-	getUserToken(userId: string): string | undefined {
-		const cached = this.userTokenCache.get(userId);
-		this.logger.debug('[DBX-TOKEN] Getting token for user', {
-			userId,
-			found: !!cached,
-			expired: cached ? cached.expiresAt <= Date.now() : 'N/A',
-			cacheSize: this.userTokenCache.size,
-		});
-		if (cached && cached.expiresAt > Date.now()) {
-			return cached.token;
-		}
-		// Expired or not found
-		this.userTokenCache.delete(userId);
-		return undefined;
-	}
-
-	/**
-	 * Clear a user's stored Databricks token (called during logout)
-	 */
-	clearUserToken(userId: string): void {
-		this.userTokenCache.delete(userId);
-	}
-
-	/**
-	 * Extract Databricks token from request headers or cache.
-	 * Single source of truth for token extraction - DO NOT duplicate this logic in controllers.
+	 * Extract Databricks token from request headers.
+	 * Token MUST be in the request header - no server-side caching.
 	 *
-	 * Checks multiple sources in order:
+	 * Checks headers in order:
 	 * 1. x-databricks-token header (explicit token from frontend)
 	 * 2. x-forwarded-access-token header (from reverse proxy with OAuth2)
 	 * 3. x-forwarded-token header (alternative reverse proxy header)
-	 * 4. Server-side cache (stored during login)
-	 *
-	 * If a token is found in headers, it's automatically cached for the user.
 	 */
-	getTokenFromRequest(req: { headers: Record<string, unknown>; user?: { id: string } }):
-		| string
-		| undefined {
-		// Check for explicit token header
+	getTokenFromRequest(req: { headers: Record<string, unknown> }): string | undefined {
 		const headerToken = req.headers['x-databricks-token'] as string | undefined;
-		// Check for reverse proxy OAuth2 token (forwarded by oauth2-proxy, etc.)
 		const forwardedToken =
 			(req.headers['x-forwarded-access-token'] as string | undefined) ||
 			(req.headers['x-forwarded-token'] as string | undefined);
 
-		const token = headerToken || forwardedToken;
-
-		this.logger.debug('[DBX-TOKEN] getTokenFromRequest called', {
-			hasHeaderToken: !!headerToken,
-			hasForwardedToken: !!forwardedToken,
-			userId: req.user?.id,
-		});
-
-		// Return header token directly if found (important for login endpoints where req.user is not set yet)
-		if (token) {
-			// Cache the token if user is already known
-			if (req.user?.id) {
-				this.setUserToken(req.user.id, token);
-			}
-			return token;
-		}
-
-		// Fall back to server-side cache if user is known
-		if (req.user?.id) {
-			const cachedToken = this.getUserToken(req.user.id);
-			this.logger.debug('[DBX-TOKEN] Retrieved from cache', {
-				userId: req.user.id,
-				found: !!cachedToken,
-			});
-			return cachedToken;
-		}
-
-		return undefined;
+		return headerToken || forwardedToken;
 	}
 
 	/**
@@ -357,10 +280,10 @@ export class DatabricksPermissionService {
 
 	/**
 	 * Get Databricks identity (user ID and group IDs) from token.
-	 * Results are cached for 5 minutes.
+	 * Cached by token - different token = fresh fetch.
 	 */
 	async getDatabricksIdentity(databricksToken: string): Promise<DatabricksIdentity> {
-		// Check cache first
+		// Check cache - keyed by token, so different token = cache miss
 		const cached = this.identityCache.get(databricksToken);
 		if (cached && cached.expiresAt > Date.now()) {
 			return cached.identity;
@@ -374,10 +297,17 @@ export class DatabricksPermissionService {
 				groupIds: userData.groups?.map((g) => g.value) ?? [],
 			};
 
-			// Cache the result
+			this.logger.info('[Databricks RBAC] Identified principal from token', {
+				userId: userData.id,
+				userName: userData.userName,
+				displayName: userData.displayName,
+				groupCount: identity.groupIds.length,
+			});
+
+			// Cache by token
 			this.identityCache.set(databricksToken, {
 				identity,
-				expiresAt: Date.now() + this.CACHE_TTL_MS,
+				expiresAt: Date.now() + this.IDENTITY_CACHE_TTL_MS,
 			});
 
 			return identity;
@@ -592,20 +522,9 @@ export class DatabricksPermissionService {
 			return [];
 		}
 	}
-
-	/**
-	 * Clear the identity cache
-	 */
-	clearCache(databricksToken?: string): void {
-		if (databricksToken) {
-			this.identityCache.delete(databricksToken);
-		} else {
-			this.identityCache.clear();
-		}
-	}
 }
 
-interface DatabricksIdentity {
+export interface DatabricksIdentity {
 	userId: string;
 	groupIds: string[];
 }
@@ -616,4 +535,6 @@ export interface DatabricksCurrentUserResponse {
 	displayName?: string;
 	emails?: Array<{ value: string; primary?: boolean }>;
 	groups?: Array<{ value: string; display: string; $ref?: string }>;
+	// Service principals have applicationId, users don't
+	applicationId?: string;
 }

@@ -226,15 +226,15 @@ export class CredentialsController {
 			const databricksToken = this.databricksPermissionService.getTokenFromRequest(req);
 			if (databricksToken) {
 				try {
-					const creatorDatabricksId =
-						await this.databricksPermissionService.getCurrentUserDatabricksId(databricksToken);
+					const creatorIdentity =
+						await this.databricksPermissionService.getDatabricksIdentity(databricksToken);
 					const allCredentialScopes =
 						this.databricksPermissionService.getAvailableScopes('credential');
 					await this.databricksPermissionService.grantScopes(
 						'credential',
 						newCredential.id,
 						'user',
-						creatorDatabricksId,
+						creatorIdentity.userId,
 						[...allCredentialScopes],
 					);
 				} catch (error) {

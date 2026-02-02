@@ -137,9 +137,6 @@ export class AuthController {
 
 				this.authService.issueCookie(res, user, false, req.browserId);
 
-				// Store Databricks token server-side for SCIM API calls
-				this.databricksPermissionService.setUserToken(user.id, databricksToken);
-
 				// Create or update auth identity for Databricks
 				await this.ensureDatabricksAuthIdentity(user, databricksUser.id);
 
@@ -285,14 +282,6 @@ export class AuthController {
 			}
 
 			this.authService.issueCookie(res, user, false, req.browserId);
-
-			// Store Databricks token server-side for SCIM API calls
-			this.logger.debug('[DBX-TOKEN] Federated login - storing token', {
-				userId: user.id,
-				tokenLength: token.length,
-				tokenPrefix: token.substring(0, 10) + '...',
-			});
-			this.databricksPermissionService.setUserToken(user.id, token);
 
 			// Create or update auth identity for Databricks
 			await this.ensureDatabricksAuthIdentity(user, databricksUser.id);
