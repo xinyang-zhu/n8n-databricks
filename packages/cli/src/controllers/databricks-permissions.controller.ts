@@ -8,6 +8,7 @@ import axios from 'axios';
 
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
+import { userHasScopes } from '@/permissions.ee/check-access';
 import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 
 interface GrantScopesDto {
@@ -127,6 +128,37 @@ export class DatabricksPermissionsController {
 	// ============================================================
 
 	/**
+	 * Check if user can manage Databricks permissions for a resource.
+	 * Uses MERGE(DBX, N8N) logic: user can manage if EITHER system grants share permission.
+	 */
+	private async canManagePermissions(
+		req: AuthenticatedRequest,
+		securableType: DatabricksSecurableType,
+		securableId: string,
+		databricksScopes: string[],
+	): Promise<boolean> {
+		// Check Databricks share permission
+		const hasDatabricksShare = databricksScopes.includes(`${securableType}:share`);
+
+		if (hasDatabricksShare) {
+			return true;
+		}
+
+		// Check n8n share permission - MERGE logic
+		const n8nShareScope = `${securableType}:share`;
+		const scopeContext =
+			securableType === 'workflow'
+				? { workflowId: securableId }
+				: securableType === 'credential'
+					? { credentialId: securableId }
+					: {};
+
+		const hasN8nShare = await userHasScopes(req.user, [n8nShareScope], false, scopeContext);
+
+		return hasN8nShare;
+	}
+
+	/**
 	 * Get permissions for any securable resource
 	 */
 	@Get('/permissions/:securableType/:securableId')
@@ -140,11 +172,6 @@ export class DatabricksPermissionsController {
 		const securableType = this.validateSecurableType(securableTypeParam);
 		const databricksToken = this.permissionService.getTokenFromRequest(req);
 
-		// Note: We rely on n8n's built-in access control to determine if the user
-		// can access this resource. If they can see the workflow/credential/etc,
-		// they can view its Databricks permissions. This is intentional for
-		// backwards compatibility during the transition to explicit permissions.
-
 		const permissionGroups = await this.permissionService.getPermissionGroups(
 			securableType,
 			securableId,
@@ -156,13 +183,8 @@ export class DatabricksPermissionsController {
 		);
 		const availableScopes = this.permissionService.getAvailableScopes(securableType);
 
-		// If user has no explicit Databricks scopes but can access the resource via n8n,
-		// they can manage permissions (backwards compatibility for resource owners)
-		// Also check for legacy "MANAGE" permission for backwards compatibility
-		const canManage =
-			userScopes.length === 0 ||
-			userScopes.includes(`${securableType}:share`) ||
-			userScopes.includes('MANAGE');
+		// MERGE(DBX, N8N): user can manage if EITHER system grants share permission
+		const canManage = await this.canManagePermissions(req, securableType, securableId, userScopes);
 
 		return {
 			securableType,
@@ -211,16 +233,18 @@ export class DatabricksPermissionsController {
 		}
 
 		try {
-			// Check if user has share scope OR no explicit Databricks scopes (n8n access only)
+			// MERGE(DBX, N8N): Check if user can manage via either system
 			const userScopes = await this.permissionService.getScopes(
 				securableType,
 				securableId,
 				databricksToken,
 			);
-			const canManage =
-				userScopes.length === 0 ||
-				userScopes.includes(`${securableType}:share`) ||
-				userScopes.includes('MANAGE');
+			const canManage = await this.canManagePermissions(
+				req,
+				securableType,
+				securableId,
+				userScopes,
+			);
 			if (!canManage) {
 				throw new ForbiddenError('You do not have permission to manage this resource');
 			}
@@ -270,16 +294,18 @@ export class DatabricksPermissionsController {
 		}
 
 		try {
-			// Check if user has share scope OR no explicit Databricks scopes (n8n access only)
+			// MERGE(DBX, N8N): Check if user can manage via either system
 			const userScopes = await this.permissionService.getScopes(
 				securableType,
 				securableId,
 				databricksToken,
 			);
-			const canManage =
-				userScopes.length === 0 ||
-				userScopes.includes(`${securableType}:share`) ||
-				userScopes.includes('MANAGE');
+			const canManage = await this.canManagePermissions(
+				req,
+				securableType,
+				securableId,
+				userScopes,
+			);
 			if (!canManage) {
 				throw new ForbiddenError('You do not have permission to manage this resource');
 			}
@@ -349,16 +375,18 @@ export class DatabricksPermissionsController {
 		}
 
 		try {
-			// Check if user has share scope OR no explicit Databricks scopes (n8n access only)
+			// MERGE(DBX, N8N): Check if user can manage via either system
 			const userScopes = await this.permissionService.getScopes(
 				securableType,
 				securableId,
 				databricksToken,
 			);
-			const canManage =
-				userScopes.length === 0 ||
-				userScopes.includes(`${securableType}:share`) ||
-				userScopes.includes('MANAGE');
+			const canManage = await this.canManagePermissions(
+				req,
+				securableType,
+				securableId,
+				userScopes,
+			);
 			if (!canManage) {
 				throw new ForbiddenError('You do not have permission to manage this resource');
 			}

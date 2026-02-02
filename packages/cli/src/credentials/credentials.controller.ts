@@ -10,7 +10,6 @@ import {
 	SharedCredentials,
 	ProjectRelationRepository,
 	SharedCredentialsRepository,
-	CredentialsRepository,
 	AuthenticatedRequest,
 } from '@n8n/db';
 import {
@@ -59,7 +58,6 @@ export class CredentialsController {
 		private readonly logger: Logger,
 		private readonly userManagementMailer: UserManagementMailer,
 		private readonly sharedCredentialsRepository: SharedCredentialsRepository,
-		private readonly credentialsRepository: CredentialsRepository,
 		private readonly projectRelationRepository: ProjectRelationRepository,
 		private readonly eventService: EventService,
 		private readonly credentialsFinderService: CredentialsFinderService,
@@ -95,9 +93,11 @@ export class CredentialsController {
 					const newIds = databricksAccessibleIds.filter((id) => !existingIds.has(id));
 
 					if (newIds.length > 0) {
-						const additionalCredentials = await this.credentialsRepository.getManyByIds(newIds, {
-							withSharings: true,
-						});
+						const additionalCredentials = await this.credentialsService.getManyByIds(
+							newIds,
+							req.user,
+							{ includeScopes: query.includeScopes },
+						);
 						for (const credential of additionalCredentials) {
 							credentials.push(credential);
 						}

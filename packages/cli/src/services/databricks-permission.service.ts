@@ -10,48 +10,22 @@ import axios from 'axios';
 /**
  * Legacy permission to new scope mapping.
  * USE = read + execute
- * MANAGE = all scopes
  */
 const LEGACY_SCOPE_MAPPING: Record<string, Record<string, string[]>> = {
 	workflow: {
 		READ: ['workflow:read'],
 		USE: ['workflow:read', 'workflow:execute'],
 		WRITE: ['workflow:read', 'workflow:update', 'workflow:execute'],
-		MANAGE: [
-			'workflow:read',
-			'workflow:update',
-			'workflow:delete',
-			'workflow:execute',
-			'workflow:share',
-			'workflow:move',
-			'workflow:activate',
-			'workflow:deactivate',
-			'workflow:publish',
-		],
 	},
 	credential: {
 		READ: ['credential:read'],
 		USE: ['credential:read'],
 		WRITE: ['credential:read', 'credential:update'],
-		MANAGE: [
-			'credential:read',
-			'credential:update',
-			'credential:delete',
-			'credential:share',
-			'credential:move',
-		],
 	},
 	data_table: {
 		READ: ['dataTable:read', 'dataTable:readRow'],
 		USE: ['dataTable:read', 'dataTable:readRow'],
 		WRITE: ['dataTable:read', 'dataTable:update', 'dataTable:readRow', 'dataTable:writeRow'],
-		MANAGE: [
-			'dataTable:read',
-			'dataTable:update',
-			'dataTable:delete',
-			'dataTable:readRow',
-			'dataTable:writeRow',
-		],
 	},
 };
 
@@ -310,7 +284,7 @@ export class DatabricksPermissionService {
 	/**
 	 * Get all permission groups for a securable resource.
 	 * Returns principals with their granted scopes.
-	 * Legacy permissions (USE, MANAGE) are converted to new scope format.
+	 * Legacy permissions (READ, USE, WRITE) are converted to new scope format.
 	 */
 	async getPermissionGroups(
 		securableType: DatabricksSecurableType,
@@ -347,7 +321,7 @@ export class DatabricksPermissionService {
 	/**
 	 * Get all scopes a user has on a securable via Databricks permissions.
 	 * Checks user ID and group memberships.
-	 * Legacy permissions (USE, MANAGE) are converted to new scope format.
+	 * Legacy permissions (READ, USE, WRITE) are converted to new scope format.
 	 */
 	async getScopes(
 		securableType: DatabricksSecurableType,
@@ -588,7 +562,7 @@ export class DatabricksPermissionService {
 	/**
 	 * Get all securable IDs that the user has access to via Databricks permissions.
 	 * Returns IDs where the user has any scope (or optionally a specific required scope).
-	 * Legacy permissions (USE, MANAGE) are converted when checking required scope.
+	 * Legacy permissions (READ, USE, WRITE) are converted when checking required scope.
 	 */
 	async getAccessibleSecurableIds(
 		securableType: DatabricksSecurableType,

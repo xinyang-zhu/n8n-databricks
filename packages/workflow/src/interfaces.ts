@@ -2957,16 +2957,16 @@ export interface DatabricksSecurablePermissions {
 export type DatabricksWorkflowPermissions = DatabricksSecurablePermissions;
 
 /** @deprecated Use scopes (string) instead */
-export type DatabricksPermission = 'READ' | 'USE' | 'WRITE' | 'MANAGE';
+export type DatabricksPermission = 'READ' | 'USE' | 'WRITE';
 
 /** @deprecated Use DATABRICKS_SECURABLE_SCOPES instead */
 export const DATABRICKS_SECURABLE_PERMISSIONS: Record<
 	DatabricksSecurableType,
 	DatabricksPermission[]
 > = {
-	workflow: ['READ', 'USE', 'WRITE', 'MANAGE'],
-	credential: ['READ', 'USE', 'MANAGE'],
-	data_table: ['READ', 'WRITE', 'MANAGE'],
+	workflow: ['READ', 'USE', 'WRITE'],
+	credential: ['READ', 'USE'],
+	data_table: ['READ', 'WRITE'],
 };
 
 /** @deprecated Use DATABRICKS_SCOPE_LABELS instead */
@@ -2974,7 +2974,6 @@ export const DATABRICKS_PERMISSION_LABELS: Record<DatabricksPermission, string> 
 	READ: 'Read',
 	USE: 'Use (Execute)',
 	WRITE: 'Write',
-	MANAGE: 'Manage',
 };
 
 export interface WorkflowFEMeta {

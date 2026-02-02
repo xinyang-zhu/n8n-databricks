@@ -39,7 +39,7 @@ export class DatabricksSecurablePermission extends WithTimestampsAndStringId {
 
 	/**
 	 * Scope/permission: n8n scope like 'workflow:read', 'workflow:execute', etc.
-	 * Legacy values 'READ', 'USE', 'WRITE', 'MANAGE' are converted on read.
+	 * Legacy values 'READ', 'USE', 'WRITE' are converted on read.
 	 */
 	@Column({ length: 32 })
 	permission: string;

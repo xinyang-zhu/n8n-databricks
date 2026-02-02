@@ -345,6 +345,32 @@ export class CredentialsService {
 	}
 
 	/**
+	 * Fetch and enrich credentials by their IDs.
+	 * Used for Databricks RBAC to get credentials the user has access to via Databricks permissions.
+	 */
+	async getManyByIds(
+		ids: string[],
+		user: User,
+		options: { includeScopes?: boolean } = {},
+	): Promise<CredentialsEntity[]> {
+		if (ids.length === 0) {
+			return [];
+		}
+
+		let credentials = await this.credentialsRepository.getManyByIds(ids, { withSharings: true });
+
+		// Add owner and sharing info
+		credentials = credentials.map((c) => this.ownershipService.addOwnedByAndSharedWith(c));
+
+		// Add scopes if requested
+		if (options.includeScopes) {
+			credentials = await this.addScopesToCredentials(credentials, user);
+		}
+
+		return credentials;
+	}
+
+	/**
 	 * @param user The user making the request
 	 * @param options.workflowId The workflow that is being edited
 	 * @param options.projectId The project owning the workflow This is useful
