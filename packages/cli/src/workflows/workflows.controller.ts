@@ -65,6 +65,7 @@ import * as ResponseHelper from '@/response-helper';
 import { DatabricksPermissionService } from '@/services/databricks-permission.service';
 import { FolderService } from '@/services/folder.service';
 import { NamingService } from '@/services/naming.service';
+import { OwnershipService } from '@/services/ownership.service';
 import { ProjectService } from '@/services/project.service.ee';
 import { TagService } from '@/services/tag.service';
 import { UserManagementMailer } from '@/user-management/email';
@@ -98,6 +99,7 @@ export class WorkflowsController {
 		private readonly executionService: ExecutionService,
 		private readonly collaborationService: CollaborationService,
 		private readonly databricksPermissionService: DatabricksPermissionService,
+		private readonly ownershipService: OwnershipService,
 	) {}
 
 	/**
@@ -414,23 +416,16 @@ export class WorkflowsController {
 						const sharedRelations =
 							await this.sharedWorkflowRepository.getAllRelationsForWorkflows(newIds);
 
-						// Attach shared relations to workflows
+						// Attach shared relations to workflows and add homeProject info
+						// Use ownershipService directly (same as workflowService.getMany does)
+						// This avoids the license check that gates enterpriseWorkflowService
 						for (const workflow of additionalWorkflows) {
 							(workflow as WorkflowEntity & { shared: SharedWorkflow[] }).shared =
 								sharedRelations.filter((r) => r.workflowId === workflow.id);
-						}
 
-						// Add owner/sharing info if sharing is enabled
-						if (this.license.isSharingEnabled()) {
-							for (const workflow of additionalWorkflows) {
-								const workflowWithMeta =
-									this.enterpriseWorkflowService.addOwnerAndSharings(workflow);
-								// @ts-expect-error: Clean up shared field
-								delete workflowWithMeta.shared;
-								data.push(workflowWithMeta);
-							}
-						} else {
-							data.push(...additionalWorkflows);
+							const workflowWithMeta = this.ownershipService.addOwnedByAndSharedWith(workflow);
+							delete workflowWithMeta.shared;
+							data.push(workflowWithMeta);
 						}
 					}
 				}
@@ -557,20 +552,12 @@ export class WorkflowsController {
 		// Compute scopes - MERGE(DBX, N8N) = union of scopes from both systems
 		const scopes = await this.getMergedWorkflowScopes(req, workflowId);
 
-		if (this.license.isSharingEnabled()) {
-			const workflowWithMetaData = this.enterpriseWorkflowService.addOwnerAndSharings(workflow);
-			await this.enterpriseWorkflowService.addCredentialsToWorkflow(workflowWithMetaData, req.user);
-
-			// @ts-expect-error: This is added as part of addOwnerAndSharings but
-			// shouldn't be returned to the frontend
-			delete workflowWithMetaData.shared;
-
-			const checksum = await calculateWorkflowChecksum(workflow);
-			return { ...workflowWithMetaData, scopes, checksum };
-		}
+		// Always add homeProject info using ownershipService (not gated by license)
+		const workflowWithMetaData = this.ownershipService.addOwnedByAndSharedWith(workflow);
+		delete workflowWithMetaData.shared;
 
 		const checksum = await calculateWorkflowChecksum(workflow);
-		return { ...workflow, scopes, checksum };
+		return { ...workflowWithMetaData, scopes, checksum };
 	}
 
 	/**
